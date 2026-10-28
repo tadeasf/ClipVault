@@ -11,7 +11,8 @@ out=desktopApp/build/compose/binaries/main
 deb=$(ls "$out"/deb/*.deb)
 work=$(mktemp -d)
 dpkg-deb -R "$deb" "$work"
-grep -q '^Recommends:' "$work/DEBIAN/control" || echo 'Recommends: copyq' >> "$work/DEBIAN/control"
+# Insert before Description: jpackage's control ends with a blank line, so appending would start a second stanza.
+grep -q '^Recommends:' "$work/DEBIAN/control" || sed -i '/^Description:/i Recommends: copyq' "$work/DEBIAN/control"
 fakeroot dpkg-deb -b "$work" "$deb"
 dpkg-deb -f "$deb" Package Version Recommends
 
