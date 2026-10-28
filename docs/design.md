@@ -91,8 +91,8 @@ a one-line justification in their PR.
 | Android key storage | Platform Android Keystore: AES-GCM key in AndroidKeyStore wraps a random 32-byte DB key | `androidx.security:security-crypto` is deprecated in favour of the platform API (https://developer.android.com/jetpack/androidx/releases/security). https://developer.android.com/privacy-and-security/keystore |
 | Linux keyring | **Step 2:** `com.github.hypfvieh:dbus-java-core` + `dbus-java-transport-native-unixsocket` 5.2.2, talking to `org.freedesktop.secrets` directly (`SecretServiceKeyring`, 138 lines) | One dependency that the tray (StatusNotifierItem) and the GlobalShortcuts portal also need. Pure-Java unix-socket transport (JDK 16+), no JNI. Uses a "plain" session (local session bus only, which the spec allows). Items go into the `default` collection; an unlock prompt, if one is shown, is awaited (120 s). No default collection, or no bus, means `detect()` returns null and the Argon2id file fallback is used. Step 1 used libsecret's `secret-tool` CLI, now removed. https://github.com/hypfvieh/dbus-java |
 | Keyring-less fallback | Passphrase-encrypted key file: Argon2id via BouncyCastle `Argon2BytesGenerator` (Tink has no Argon2), 64 MiB / t=3 / p=1 (RFC 9106 second recommended option), sealing with AES-256-GCM. The UI warns that this is the weaker mode | `org.bouncycastle:bcprov-jdk18on` 1.86, which step 6 needs for EC J-PAKE anyway |
-| Crypto primitives | Google Tink `tink-android` / `tink` 1.24.0 | Pure Java (no native libs, good for F-Droid reproducibility), Google-maintained, exposes X25519, HKDF, XChaCha20-Poly1305, Ed25519. The libsodium KMP binding (ionspin 0.9.5) labels itself "Experimental" and has no RFC 5869 HKDF. https://github.com/tink-crypto/tink-java |
-| PAKE (6-digit code) | BouncyCastle `bcprov-jdk18on` 1.86, EC J-PAKE (`org.bouncycastle.crypto.agreement.ecjpake`, RFC 8236) | No maintained SPAKE2/CPace/OPAQUE on Maven Central. EC J-PAKE is the best maintained real PAKE we found. Pure Java. https://github.com/bcgit/bc-java |
+| Crypto primitives | Google Tink `tink-android` / `tink` 1.24.0. **Under review (handshake.md section 2):** Tink's explicit-nonce XChaCha20-Poly1305 is only in its `internal` package; proposal is BouncyCastle 1.86 for all primitives | Pure Java (no native libs, good for F-Droid reproducibility), Google-maintained, exposes X25519, HKDF, XChaCha20-Poly1305, Ed25519. The libsodium KMP binding (ionspin 0.9.5) labels itself "Experimental" and has no RFC 5869 HKDF. https://github.com/tink-crypto/tink-java |
+| PAKE (6-digit code) | BouncyCastle `bcprov-jdk18on` 1.86, J-PAKE. **Proposed:** finite-field `org.bouncycastle.crypto.agreement.jpake` over `NIST_3072`, because EC J-PAKE's `ECSchnorrZKP` has no public constructor (pairing.md section 2.1) | No maintained SPAKE2/CPace/OPAQUE on Maven Central. EC J-PAKE is the best maintained real PAKE we found. Pure Java. https://github.com/bcgit/bc-java |
 | Transport | Ktor 3.6.0 server (CIO engine) + client, WebSockets plugin | CIO is the lightest pure-Kotlin engine. Ktor does not officially list Android for any engine **[verify on device at step 7]**. https://ktor.io/docs/server-engines.html |
 | Desktop mDNS | `org.jmdns:jmdns` 3.6.4 | Released 2026-10-10, active. https://github.com/jmdns/jmdns |
 | Android mDNS | Platform `NsdManager` | https://developer.android.com/develop/connectivity/wifi/use-nsd |
@@ -183,12 +183,17 @@ explicit request for external review. See open question 3.
 
 ### 5.3 Pairing
 
-- **QR code:** the QR holds the device ID, the LAN address:port, an ephemeral X25519 public key and
-  a 128-bit one-time token valid for 2 minutes. The scanner connects, both sides run the handshake
-  bound to the token, and they exchange identity keys.
-- **6-digit code:** the two devices run EC J-PAKE with the code as the secret. The code is
+Specified in [`docs/sync/pairing.md`](sync/pairing.md), which supersedes this summary.
+
+- **QR code:** the QR holds the LAN addresses, the port and a 128-bit one-time token valid for 2
+  minutes. No device ID and no ephemeral key: the token alone authenticates, and identities only
+  travel encrypted. The scanner connects, both sides run the handshake bound to the token, and they
+  exchange identity keys.
+- **6-digit code:** the two devices run J-PAKE with the code as the secret. The code is
   single-use: a failed attempt invalidates it and shows a new one. That limits online guessing to
   1-in-a-million per displayed code.
+  - **Variant:** finite-field J-PAKE is proposed instead of EC J-PAKE, because BouncyCastle's EC
+    proof class can't be rebuilt from bytes with its public API (pairing.md section 2.1).
 - **Desktop to desktop:** neither side has a camera, so these pairs use the 6-digit code.
 
 ### 5.4 Discovery and privacy
@@ -405,9 +410,17 @@ The brief's steps 0-9 stay as given. Adjustments:
     not move the clock back, and a unique MetaEvent index so duplicates are no-ops.
   - **Re-copy:** a re-copy bumps the newest live member instead of re-seq'ing the row.
   - **Pin and delete:** these act on every live member of a row.
-- **Step 6:** `docs/sync/handshake.md` is written and reviewed before any handshake code.
+- **Step 6:** part A, the specs [`docs/sync/handshake.md`](sync/handshake.md) and
+  [`docs/sync/pairing.md`](sync/pairing.md), is reviewed before any handshake or pairing code.
+  Part B implements them against the test vectors.
 - **Step 7:** transport and discovery, plus the agent's sync loop.
-- **Step 8:** the sync UI on Android, plus a small Compose desktop window for pairing and status.
+  - **Required:** each `SyncNode` runs on one single-threaded dispatcher. A
+    convergence-under-concurrency test (local writes, received events and several live sessions
+    on real threads) must pass before step 7 is done.
+- **Step 8:** the sync UI on Android. Desktop pairing and status stay in the terminal
+  (`clipvault-agent pair`, pairing.md section 5); there is no Compose desktop window in v1.
+  - **Required:** a settings change that affects sync (sensitive opt-ins, `syncEnabledAt`,
+    exclusions) closes and reconnects live sessions, so peers see the new Hello at once.
 - **Step 9:** hardening. Desktop packaging already landed in step 4. Also our own GNOME Shell
   extension (about 100 lines of GJS) that exposes the focused window's app ID over D-Bus, so
   per-app exclusions work on GNOME Wayland (decided 2026-10-28; until then they are unavailable
