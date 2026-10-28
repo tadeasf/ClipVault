@@ -30,6 +30,8 @@ slf4j = "2.0.17"
 kotest = "6.2.6"
 zxing = "3.5.4"
 jmdns = "3.6.4"
+androidx-work = "2.12.0"
+androidx-camera = "1.6.2"
 
 [libraries]
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
@@ -70,6 +72,11 @@ kotlinx-serializationCbor = { module = "org.jetbrains.kotlinx:kotlinx-serializat
 kotest-property = { module = "io.kotest:kotest-property", version.ref = "kotest" }
 zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
 jmdns = { module = "org.jmdns:jmdns", version.ref = "jmdns" }
+androidx-work-runtime = { module = "androidx.work:work-runtime-ktx", version.ref = "androidx-work" }
+androidx-work-testing = { module = "androidx.work:work-testing", version.ref = "androidx-work" }
+androidx-camera-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "androidx-camera" }
+androidx-camera-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "androidx-camera" }
+androidx-camera-view = { module = "androidx.camera:camera-view", version.ref = "androidx-camera" }
 dbus-java-core = { module = "com.github.hypfvieh:dbus-java-core", version.ref = "dbus-java" }
 dbus-java-transport = { module = "com.github.hypfvieh:dbus-java-transport-native-unixsocket", version.ref = "dbus-java" }
 slf4j-nop = { module = "org.slf4j:slf4j-nop", version.ref = "slf4j" }

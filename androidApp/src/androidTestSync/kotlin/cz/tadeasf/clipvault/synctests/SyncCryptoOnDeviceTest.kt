@@ -1,4 +1,4 @@
-package cz.tadeasf.clipvault
+package cz.tadeasf.clipvault.synctests
 
 import cz.tadeasf.clipvault.sync.crypto.crypto
 import cz.tadeasf.clipvault.sync.pairing.QrPayload

@@ -39,11 +39,17 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         val env = AppEnvironment(graph.repository, graph.ingest, graph.settings, AndroidAppPlatform(this, FLAVOR_NAME))
+        val sync = flavorSyncUi(this)
         setContent {
             SystemBarsFollowTheme()
-            ClipVaultApp(env, sourceIcon = { SourceAppIcon(it) }, syncSection = flavorSyncSection())
+            ClipVaultApp(env, sourceIcon = { SourceAppIcon(it) }, sync = sync)
         }
         lifecycleScope.launch { requestNotificationPermissionWhenEnabled() }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        flavorAppVisible(this) // the sync service may only be started from the foreground
     }
 
     override fun onResume() {
