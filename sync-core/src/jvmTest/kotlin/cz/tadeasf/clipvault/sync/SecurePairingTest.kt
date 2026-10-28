@@ -198,7 +198,7 @@ class SecurePairingTest {
             val link = net.pairByQr("A", "B")
             net.clock += SecureChannel.MAX_AGE_MILLIS
             net.tick()
-            assertEquals("session limit (24 h): reconnect", link.dialer.closeReason)
+            assertEquals("session limit: reconnect", link.dialer.closeReason)
 
             // A reconnect is a fresh handshake.
             net.clock += 1

@@ -1,6 +1,6 @@
 package cz.tadeasf.clipvault.sync.secure
 
-import cz.tadeasf.clipvault.sync.SyncNode
+import cz.tadeasf.clipvault.sync.SyncEngine
 import cz.tadeasf.clipvault.sync.SyncSession
 import cz.tadeasf.clipvault.sync.crypto.Crypto
 import cz.tadeasf.clipvault.sync.crypto.CryptoFailure
@@ -16,6 +16,8 @@ import cz.tadeasf.clipvault.sync.wire.Decoded
 import cz.tadeasf.clipvault.sync.wire.Identity
 import cz.tadeasf.clipvault.sync.wire.Message
 import cz.tadeasf.clipvault.sync.wire.PairConfirm
+import cz.tadeasf.clipvault.sync.wire.Ping
+import cz.tadeasf.clipvault.sync.wire.Pong
 import cz.tadeasf.clipvault.sync.wire.Revoke
 import cz.tadeasf.clipvault.sync.wire.WireCodec
 import kotlinx.serialization.SerializationException
@@ -26,7 +28,7 @@ class ConfirmRequest(val words: List<String>, val peerName: String, val answer: 
 /** What a device brings to every secure connection. */
 class SecureEndpoint(
     val crypto: Crypto,
-    val node: SyncNode,
+    val engine: SyncEngine,
     val peers: PeerStore,
     val windows: PairingWindows,
     val guard: HandshakeGuard,
@@ -94,6 +96,18 @@ class SecureConnection private constructor(
 
     val closed: Boolean get() = state == State.CLOSED
 
+    /** True for the side that dialled; the simultaneous-connect rule needs it. */
+    val initiatedHere: Boolean get() = initiating
+
+    // Observability and heartbeat (sealed frames only).
+    var framesIn = 0L
+        private set
+    var framesOut = 0L
+        private set
+    private var lastReceivedAt = startedAt
+    private var lastSentAt = startedAt
+    private var pings = 0L
+
     // --- initiator ---
 
     private fun dial(mode: HandshakeMode, pairBy: PairBy?) {
@@ -151,15 +165,25 @@ class SecureConnection private constructor(
             State.PAKE, State.HANDSHAKE ->
                 if (now - lastMessageAt > MESSAGE_TIMEOUT || now - startedAt > HANDSHAKE_TIMEOUT) abort(HandshakeFailure.Kind.TIMEOUT, "handshake timed out")
             State.PAIRING -> if (now - pairingStartedAt > PairingWindows.TTL_MILLIS) close("pairing not confirmed in time")
-            State.SYNC -> if (channel!!.expired) close("session limit (24 h): reconnect")
+            State.SYNC -> {
+                val channel = channel!!
+                when {
+                    // Bye while it can still be sealed; the node reconnects (handshake.md section 5).
+                    channel.ageMillis >= SecureChannel.MAX_AGE_MILLIS - LIMIT_MARGIN_MILLIS || channel.sendsLeft <= LIMIT_MARGIN_FRAMES ->
+                        finish("session limit: reconnect")
+                    now - lastReceivedAt >= HEARTBEAT_MILLIS * MISSED_HEARTBEATS -> close("heartbeat timeout")
+                    now - lastSentAt >= HEARTBEAT_MILLIS -> sendMessage(Ping(++pings))
+                }
+            }
             State.CLOSED -> Unit
         }
     }
 
-    /** An orderly end of a running sync session: Bye, then close. */
+    /** An orderly end of a running sync session: Bye (if a frame can still be sealed), then close. */
     fun finish(reason: String) {
         if (state != State.SYNC) return
-        syncSession?.close(reason)
+        val channel = channel!!
+        if (!channel.expired && channel.sendsLeft > 0) syncSession?.close(reason) else syncSession?.close()
         close(reason)
     }
 
@@ -270,6 +294,8 @@ class SecureConnection private constructor(
 
     private fun frame(body: ByteArray) {
         val (counter, plaintext) = channel!!.open(body)
+        framesIn++
+        lastReceivedAt = e.now()
         val decoded = try {
             WireCodec.decode(plaintext)
         } catch (_: SerializationException) {
@@ -292,6 +318,8 @@ class SecureConnection private constructor(
             return close("revoked by peer")
         }
         if (state == State.SYNC) {
+            if (message is Ping) return sendMessage(Pong(message.id))
+            if (message is Pong) return
             val session = syncSession!!
             session.receive(message)
             if (session.closed) close(session.closeReason ?: "sync session ended")
@@ -343,7 +371,8 @@ class SecureConnection private constructor(
 
     private fun startSync(peer: ByteArray) {
         state = State.SYNC
-        syncSession = e.node.connect(deviceIdOf(c, peer)) { sendMessage(it) }
+        lastReceivedAt = e.now()
+        syncSession = e.engine.connect(deviceIdOf(c, peer)) { sendMessage(it) }
     }
 
     private fun sendMessage(message: Message) {
@@ -351,6 +380,8 @@ class SecureConnection private constructor(
         if (closed) return
         try {
             send(channel.seal(WireCodec.encode(message, channel.nextCounter)))
+            framesOut++
+            lastSentAt = e.now()
         } catch (f: ChannelClosed) {
             close(f.message ?: "channel closed")
         }
@@ -401,6 +432,10 @@ class SecureConnection private constructor(
             }
 
         const val MESSAGE_TIMEOUT = 10_000L
+        const val HEARTBEAT_MILLIS = 30_000L
+        const val MISSED_HEARTBEATS = 3
+        private const val LIMIT_MARGIN_MILLIS = 60_000L
+        private const val LIMIT_MARGIN_FRAMES = 16L
         const val HANDSHAKE_TIMEOUT = 30_000L
         const val MAX_PAKE_MESSAGE = 4096
         private const val PAKE_R1: Byte = 0x10

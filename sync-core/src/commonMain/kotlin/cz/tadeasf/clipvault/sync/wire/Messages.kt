@@ -55,7 +55,13 @@ sealed interface Message
 
 @Serializable
 @SerialName("hello")
-data class Hello(val deviceId: String, val sensitiveOptIn: Set<String> = emptySet(), val maxPayloadBytes: Long = DEFAULT_MAX_PAYLOAD) : Message
+data class Hello(
+    val deviceId: String,
+    val sensitiveOptIn: Set<String> = emptySet(),
+    val maxPayloadBytes: Long = DEFAULT_MAX_PAYLOAD,
+    /** 1.2, informational: when the sender enabled sync (its own older clips are never sent). */
+    val syncEnabledAt: Long? = null,
+) : Message
 
 /** [onlySensitive] non-null: a re-scan from [sinceSeq] limited to sensitive clips of these categories (section 10). */
 @Serializable
@@ -102,5 +108,17 @@ data object PairConfirm : Message
 @SerialName("revoke")
 data object Revoke : Message
 
-/** Design 5.5. */
+/** 1.2: heartbeat on an idle session (protocol.md section 11). */
+@Serializable
+@SerialName("ping")
+data class Ping(val id: Long) : Message
+
+@Serializable
+@SerialName("pong")
+data class Pong(val id: Long) : Message
+
+/** Design 5.5: the default inline cap. */
 const val DEFAULT_MAX_PAYLOAD = 1024L * 1024
+
+/** No payload larger than this is ever sent, inline or fetched, nor accepted. */
+const val HARD_MAX_PAYLOAD = 1024L * 1024

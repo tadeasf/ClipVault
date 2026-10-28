@@ -32,7 +32,10 @@ class Device(val id: String, dir: File, config: SyncConfig, private val now: () 
     /** The id local events are authored under; enableSync switches it to the identity-derived one. */
     var deviceId: String = id
     private val repo get() = SqlClipRepository(db, deviceId, now, Dispatchers.Unconfined)
-    val node = SyncNode(db, syncDb, config)
+    val node = SyncEngine(db, syncDb, config)
+
+    /** A local write without notifying the engine (the SyncNode's write { } does that, on its dispatcher). */
+    suspend fun add(text: String): String = repo.insert(ClipDraft(text)).id
 
     suspend fun copy(text: String, sourcePackage: String? = null): String =
         repo.insert(ClipDraft(text, ClipHints(sourcePackage = sourcePackage))).id.also { node.changed() }

@@ -6,7 +6,7 @@ import com.google.zxing.common.BitMatrix
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import cz.tadeasf.clipvault.sync.SyncConfig
-import cz.tadeasf.clipvault.sync.SyncNode
+import cz.tadeasf.clipvault.sync.SyncEngine
 import cz.tadeasf.clipvault.sync.crypto.crypto
 import cz.tadeasf.clipvault.sync.pairing.PairingWindows
 import cz.tadeasf.clipvault.sync.pairing.PeerStore
@@ -67,7 +67,7 @@ class PairCommand(
         val first = peers.identity() == null
         val deviceId = enableSync(clips, peers, c)
         if (first) out.println("Sync enabled on this device (device id $deviceId).")
-        val node = SyncNode(clips, sync, SyncConfig(deviceId, syncEnabledAt = syncEnabledAt(clips) ?: now()))
+        val node = SyncEngine(clips, sync, SyncConfig(deviceId, syncEnabledAt = syncEnabledAt(clips) ?: now()))
         val windows = PairingWindows(c, now)
         return Ctx(SecureEndpoint(c, node, peers, windows, HandshakeGuard(now), now, name, ::askWords), windows)
     }

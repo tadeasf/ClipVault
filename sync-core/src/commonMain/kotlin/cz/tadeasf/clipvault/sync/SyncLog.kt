@@ -7,6 +7,7 @@ import cz.tadeasf.clipvault.detect.SensitiveCategory
 import cz.tadeasf.clipvault.history.ClipLog
 import cz.tadeasf.clipvault.sync.db.SyncDatabase
 import cz.tadeasf.clipvault.sync.wire.ClipCreated
+import cz.tadeasf.clipvault.sync.wire.HARD_MAX_PAYLOAD
 import cz.tadeasf.clipvault.sync.wire.Hello
 import cz.tadeasf.clipvault.sync.wire.MetaChanged
 import cz.tadeasf.clipvault.sync.wire.SyncEvent
@@ -46,7 +47,7 @@ internal class SyncLog(private val db: ClipDatabase, private val syncDb: SyncDat
         val member = members.selectById(memberId).executeAsOneOrNull() ?: return null
         val clip = clips.selectById(member.clipId).executeAsOneOrNull() ?: return null
         if (!allowed(clip, member, peer, null) || clip.content.isEmpty()) return null
-        return clip.content.encodeToByteArray()
+        return clip.content.encodeToByteArray().takeIf { it.size <= HARD_MAX_PAYLOAD }
     }
 
     private fun cameFrom(seq: Long, peer: Hello) = syncDb.syncQueries.origin(seq).executeAsOneOrNull() == peer.deviceId
@@ -56,7 +57,7 @@ internal class SyncLog(private val db: ClipDatabase, private val syncDb: SyncDat
         val clip = clips.selectById(member.clipId).executeAsOneOrNull() ?: return null
         if (!allowed(clip, member, peer, onlySensitive)) return null
         val bytes = clip.content.encodeToByteArray()
-        val cap = minOf(config().maxPayloadBytes, peer.maxPayloadBytes)
+        val cap = minOf(config().maxPayloadBytes, peer.maxPayloadBytes, HARD_MAX_PAYLOAD)
         return ClipCreated(
             seq = member.seq,
             lamport = member.lamportClock,
