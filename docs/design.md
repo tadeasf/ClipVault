@@ -68,11 +68,11 @@ version when we have a reason.
 | CMP material3 | 1.12.0-alpha03 | wizard pins an alpha; we accept that, a stable is not published for this line **[verify]** |
 | compileSdk / targetSdk / minSdk | 37 / 37 / 26 | SDK 37 installed locally. minSdk 26 (wizard says 24; sqlcipher-android needs 23; 26 gives us java.time and NotificationChannel without desugaring) |
 | SQLDelight | 2.4.1 | https://github.com/sqldelight/sqldelight/releases |
-| AndroidX Paging (KMP) | 3.5.3 | https://developer.android.com/jetpack/androidx/releases/paging; jvm target **[verify at step 1]** |
+| AndroidX Paging (KMP) | 3.5.3 | https://developer.android.com/jetpack/androidx/releases/paging; jvm variant is `paging-common-desktop` (resolved step 1) |
 | Ktor | 3.6.0 | https://github.com/ktorio/ktor/releases |
 | kotlinx-coroutines | 1.11.0 | wizard output |
 | kotlinx-serialization | 1.12.0 | https://github.com/Kotlin/kotlinx.serialization/releases; Kotlin pairing **[verify]** |
-| Kover | 0.9.11 | https://github.com/Kotlin/kotlinx-kover; KMP android+jvm documented, new AGP KMP plugin **[verify]** |
+| Kover | 0.9.11 | https://github.com/Kotlin/kotlinx-kover; works with the new AGP KMP plugin, host tests only (resolved step 1, see 6.6) |
 
 Note: the locally installed Gradle (8.14.3 via mise) is too old for AGP 9. The wrapper is used.
 
@@ -86,8 +86,8 @@ a one-line justification in their PR.
 | Android DB encryption | `net.zetetic:sqlcipher-android` 4.20.0 + `androidx.sqlite:sqlite` | Successor to android-database-sqlcipher, actively maintained, minSdk 23. Plug `SupportOpenHelperFactory(keyBytes)` into SQLDelight's `AndroidSqliteDriver`. https://github.com/sqlcipher/sqlcipher-android |
 | Desktop DB encryption | `io.github.willena:sqlite-jdbc` 3.53.4.0 (sqlite-jdbc-crypt), replacing `org.xerial:sqlite-jdbc` under `app.cash.sqldelight:sqlite-driver` | Same `org.sqlite` package, so it drops in under `JdbcSqliteDriver`. Bundles Linux x86_64 + aarch64 natives. Configure with `SQLiteMCSqlCipherConfig`. https://github.com/Willena/sqlite-jdbc-crypt |
 | Android key storage | Platform Android Keystore: AES-GCM key in AndroidKeyStore wraps a random 32-byte DB key | `androidx.security:security-crypto` is deprecated in favour of the platform API (https://developer.android.com/jetpack/androidx/releases/security). https://developer.android.com/privacy-and-security/keystore |
-| Linux keyring | `de.swiesend:secret-service` 3.x, fallback to `com.github.hypfvieh:dbus-java` 5.2.2 against `org.freedesktop.secrets` | swiesend is active but only publishes alphas; java-keyring is stale since 2023. https://github.com/swiesend/secret-service, https://github.com/hypfvieh/dbus-java |
-| Keyring-less fallback | Passphrase-encrypted key file: Argon2id via Tink/BouncyCastle **[verify which exposes Argon2id]**, UI warns that this is the weaker mode | |
+| Linux keyring | **Changed at step 1:** libsecret's `secret-tool` CLI (no JVM dependency), behind a `Keyring` interface | swiesend only publishes `3.0.0-alpha`, while its README already documents an unpublished `3.0.0-beta` API, so it is still moving. secret-tool is stable libsecret: it handles unlock prompts, takes the secret on stdin (never argv), and works with GNOME Keyring, KWallet (5.97+) and KeePassXC. It is a runtime binary: Fedora's `libsecret` package ships it; Debian's `libsecret-tools` does not come by default, so the `.deb` must depend on it. Without it, the passphrase fallback is used. Swapping to dbus-java is one class |
+| Keyring-less fallback | Passphrase-encrypted key file: Argon2id via BouncyCastle `Argon2BytesGenerator` (Tink has no Argon2), 64 MiB / t=3 / p=1 (RFC 9106 second recommended option), sealing with AES-256-GCM. The UI warns that this is the weaker mode | `org.bouncycastle:bcprov-jdk18on` 1.86, which step 6 needs for EC J-PAKE anyway |
 | Crypto primitives | Google Tink `tink-android` / `tink` 1.24.0 | Pure Java (no native libs, good for F-Droid reproducibility), Google-maintained, exposes X25519, HKDF, XChaCha20-Poly1305, Ed25519. The libsodium KMP binding (ionspin 0.9.5) labels itself "Experimental" and has no RFC 5869 HKDF. https://github.com/tink-crypto/tink-java |
 | PAKE (6-digit code) | BouncyCastle `bcprov-jdk18on` 1.86, EC J-PAKE (`org.bouncycastle.crypto.agreement.ecjpake`, RFC 8236) | No maintained SPAKE2/CPace/OPAQUE on Maven Central. EC J-PAKE is the best maintained real PAKE we found. Pure Java. https://github.com/bcgit/bc-java |
 | Transport | Ktor 3.6.0 server (CIO engine) + client, WebSockets plugin | CIO is the lightest pure-Kotlin engine. Ktor does not officially list Android for any engine **[verify on device at step 7]**. https://ktor.io/docs/server-engines.html |
@@ -122,6 +122,16 @@ payload, sensitive, pinned, deleted, lamportClock}`. Two refinements:
   device numbers every event it *stores* (own or received) with a local monotonically increasing
   `seq`. A peer remembers "last seq I got from you" and asks for `seq > N`. Lamport stays for LWW
   ordering only. `docs/sync/protocol.md` will include this example.
+
+Step 1 implementation notes:
+- **Event counter:** `MetaEvent.seq` is an `AUTOINCREMENT` primary key, so it is never reused.
+  Clip rows have no `seq` yet. Step 5 has to give clip creations and metadata events one shared
+  counter before catch-up can use it.
+- **Delete:** deleting a clip tombstones the row (`deleted = 1`, kept for sync) and erases
+  `content` and `contentHash`, which also drops it from the FTS index.
+- **Retention:** retention by count or age is local policy. It removes rows outright, never
+  tombstones them, so another device with a longer retention keeps its copy. Pinned clips are
+  exempt.
 
 `contentHash` is SHA-256 of the plaintext. It only ever travels inside the encrypted session and
 is only stored in the encrypted DB, so a plain hash is acceptable. A short OTP's hash would be
@@ -280,19 +290,55 @@ Also:
 ### 6.6 KMP-specific awkwardness
 
 - **Java libraries in common code:** Tink, BouncyCastle, JmDNS and the SQLCipher drivers are all
-  JVM libraries, but `commonMain` cannot call Java APIs. Crypto sits behind a small `commonMain`
-  interface. We try a shared `jvmAndAndroid` intermediate source set first, so both targets compile
-  the same Tink-calling code; if dependency resolution there is unreliable, we fall back to
-  near-identical `androidMain`/`jvmMain` actuals.
-- **SQLDelight drivers:** the driver differs per platform (AndroidSqliteDriver vs JdbcSqliteDriver)
-  and so does the key format (ByteArray vs hex-string key). This is an expect/actual factory.
-  Whether a desktop database can be opened on Android (`legacy=4`) is **[verify at step 1]**. We
-  never copy DB files between devices, so it only matters for tests.
+  JVM libraries, but `commonMain` cannot call Java APIs.
+  - **Resolved (step 1):** a hand-wired `jvmAndAndroidMain` source set (`dependsOn(commonMain)`,
+    with `jvmMain` and `androidMain` depending on it) compiles JDK APIs (`MessageDigest`,
+    `javax.crypto`, `java.io.File`) once for both targets. `:shared` keeps SHA-256, AES-GCM key
+    wrapping and atomic key-file writes there.
+  - **Wiring caveat:** the hierarchy-template DSL (`group { withJvm(); withAndroidTarget() }`) does
+    not match the new AGP KMP target and is experimental, so the wiring is manual, with
+    `kotlin.mpp.applyDefaultHierarchyTemplate=false` in `shared/gradle.properties` to silence the
+    template warning.
+  - **Not yet tried:** a Java library that ships different artifacts per platform (`tink` vs
+    `tink-android`) can't be declared once in the shared set. That gets decided at step 6.
+- **SQLDelight drivers (resolved step 1):** both drivers get the same raw 32-byte key, with no
+  passphrase KDF.
+  - **Android:** `SupportOpenHelperFactory(byte[])` with SQLCipher's raw-key literal
+    `x'<64 hex>'`.
+  - **JVM:** `SQLiteMCSqlCipherConfig.getV4Defaults().withRawUnsaltedKey(key)` passed as
+    `Properties` to `JdbcSqliteDriver(url, props, schema)`.
+  - **Factory:** a `fun interface DriverFactory` in common with `AndroidDriverFactory(context)` and
+    `JvmDriverFactory(file)` rather than an `expect class`. Expect/actual classes are still Beta and
+    need a compiler flag, and the Android constructor needs a `Context` anyway.
+  - **Cross-opening:** not tested whether a desktop file opens on Android, since there is no
+    working emulator here (`docs/dev/emulator.md`). We never copy DB files between devices.
+- **FTS5 (resolved step 1):** available on both platforms.
+  - **JVM:** sqlite-jdbc-crypt passes the FTS5 tests.
+  - **Android:** sqlcipher-android 4.20.0's `libsqlcipher.so` lists `ENABLE_FTS5` in its compile
+    options; the instrumented run is still pending.
+  - **Schema:** `ClipFts` is a plain FTS5 table keyed by `Clip.rowid`, maintained by triggers.
+    `UPDATE ClipFts SET content = new.content` inside a trigger overflows SQLDelight 2.4.1's
+    resolver, so the update trigger is delete + insert.
+  - **Query:** user input is quoted per token and prefix-matched (`ftsQuery`), so FTS operators are
+    literal. Limitation: prefix only, no infix ("hub" does not find "github").
+- **Paging on jvm (resolved step 1):** AndroidX publishes the JVM variant of Paging 3.5.3 as
+  `paging-common-desktop`, not `-jvm`. The `paging-common-jvm` artifact stops at 3.4.0-alpha02,
+  which is a red herring. `QueryPagingSource` works on jvm in tests.
 - **Flavors:** single-variant AGP KMP plugin, so flavors only in `:androidApp` (section 2).
 - **AGP 9 restriction:** `com.android.application` cannot share a module with KGP's multiplatform
   plugin. That is why the app modules are separate.
-- **Coverage:** Kover with the new AGP KMP plugin is **[verify at step 1]**. The fallback is to
-  measure coverage on the `jvm` target only, since domain and service code is common anyway.
+- **Coverage (resolved step 1):** Kover 0.9.11 works with the new AGP KMP plugin.
+  - **Variants:** it registers both `Jvm` and `Android` report variants. Android classes appear in
+    the merged report.
+  - **Limitation:** Kover only measures host-JVM tests, not instrumented ones. Android-only classes
+    (`KeystoreDbKeyProvider`, `AndroidDriverFactory`) therefore show 0% even though device tests
+    cover them.
+  - **Rule:** `koverVerify` enforces 80% line coverage on everything except SQLDelight-generated
+    code.
+- **Android tests are instrumented, not Robolectric:** SQLCipher's native library is built for
+  Android ABIs and cannot load on a host JVM, and Robolectric has no AndroidKeyStore provider.
+  `withDeviceTestBuilder { sourceSetTreeName = "test" }` makes `commonTest` part of the device
+  tests, so the same repository tests run on jvm and on a device.
 
 ## 7. Delivery plan
 

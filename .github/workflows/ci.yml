@@ -20,8 +20,10 @@ jobs:
       - name: Verify vault flavor is offline
         run: ./gradlew :androidApp:verifyVaultDebugOffline :androidApp:verifyVaultReleaseOffline
 
-      - name: Tests
-        run: ./gradlew :shared:allTests :sync-core:allTests
+      # jvm only: Android repository/keystore tests are instrumented (connectedAndroidDeviceTest).
+      # The Secret Service test skips itself on runners without a keyring.
+      - name: Tests and coverage gate
+        run: ./gradlew :shared:allTests :sync-core:allTests :shared:koverVerify :shared:koverXmlReport
 
       - name: Build apps
         run: ./gradlew :androidApp:assembleVaultDebug :androidApp:assembleSyncDebug :desktopApp:jar
