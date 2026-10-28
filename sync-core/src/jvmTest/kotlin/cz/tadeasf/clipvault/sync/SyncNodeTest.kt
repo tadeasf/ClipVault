@@ -220,7 +220,10 @@ class SyncNodeTest {
             val before = net.nodes.getValue("B").connectionsOpened
             net.networks.getValue("A").corruptWrite = 3
             net.write("A", (1..20).map { "frame $it" })
-            eventually(message = { "no failure seen: ${net.status("B", "A")}" }) { net.status("B", "A").lastError == "frame authentication failed" }
+            // Since Hello.port (1.3) A knows B's address too and may redial first; then B records no error.
+            eventually(message = { "no failure seen: ${net.status("B", "A")}" }) {
+                net.status("B", "A").lastError == "frame authentication failed" || net.nodes.getValue("B").connectionsOpened > before
+            }
             net.secure.clock += 2_000
             eventually(message = { "B has ${net.texts("B").size} of 20" }) { net.texts("B").size == 20 }
             assertTrue(net.nodes.getValue("B").connectionsOpened > before)
