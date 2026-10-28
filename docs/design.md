@@ -791,3 +791,15 @@ These bind both the code and whoever works on it, including the assistant in a s
    - Reading code or docs is reported as "read in source" or "per the docs".
 5. **No user data in tests** (11.9): no rows from the user's CopyQ, ClipVault store or clipboard;
    test data is generated, and lives in a `clipvault-test` tab or a throwaway session.
+6. **No keyring daemons on the user's machine (from 2026-10-28, no exceptions).**
+   - Nobody starts `gnome-keyring-daemon`, a `dbus-run-session` with a keyring, or any other Secret
+     Service daemon on the user's machine, under any `HOME` or `XDG_DATA_HOME`. There are no
+     "temp dir" variants either.
+   - Keyring integration (`DesktopKeyTest.secretServiceRoundTrip`) is tested only in CI, on a fresh
+     runner.
+   - Locally, the root build gives every JVM test task a session bus address that can't connect, so
+     no test reaches a Secret Service. Keyring-dependent tests use the in-process fake (`FakeKeyring`
+     in `DesktopKeyTest`) or are skipped, and the skips are listed in the step report.
+   - **Why:** on 2026-10-28, "throwaway" keyring daemons started for local test runs used the real
+     `~/.local/share/keyrings` and rewrote the user's `login.keyring`, twice (17:36 and 19:26). The
+     first time cost the CopyQ history and the ClipVault store.

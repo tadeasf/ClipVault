@@ -156,6 +156,13 @@ class SecureConnection private constructor(
         }
     }
 
+    /** An orderly end of a running sync session: Bye, then close. */
+    fun finish(reason: String) {
+        if (state != State.SYNC) return
+        syncSession?.close(reason)
+        close(reason)
+    }
+
     /** Unpairs the peer over this live connection: Revoke, then close (pairing.md section 4). */
     fun revoke() {
         val peer = peerKey ?: return

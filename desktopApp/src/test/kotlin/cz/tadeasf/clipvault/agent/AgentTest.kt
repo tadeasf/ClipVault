@@ -227,6 +227,23 @@ class AgentTest {
         assertEquals(78, StoreKeyException.EXIT_CODE)
     }
 
+    // Pairing output
+
+    @Test
+    fun pairingQrPngDecodesBackToThePayload() {
+        val payload = cz.tadeasf.clipvault.sync.pairing.QrPayload(
+            addresses = listOf(byteArrayOf(10, 0, 0, 2)), port = 47321, token = ByteArray(16) { 9 }, expiresAt = 1_800_000_000,
+        ).toText()
+        val matrix = PairCommand.qr(payload)
+        val image = javax.imageio.ImageIO.read(java.io.ByteArrayInputStream(PairCommand.png(matrix)))
+        assertEquals(matrix.width * 8, image.width)
+        val pixels = IntArray(image.width * image.height).also { image.getRGB(0, 0, image.width, image.height, it, 0, image.width) }
+        val source = com.google.zxing.RGBLuminanceSource(image.width, image.height, pixels)
+        val decoded = com.google.zxing.qrcode.QRCodeReader().decode(com.google.zxing.BinaryBitmap(com.google.zxing.common.HybridBinarizer(source)))
+        assertEquals(payload, decoded.text)
+        assertEquals((matrix.height + 1) / 2, PairCommand.terminalQr(matrix).lines().count { it.isNotEmpty() })
+    }
+
     @Test
     fun sessionSwitchIsPassedToEveryCall() {
         assertEquals(listOf("copyq", "-s", "cvtest", "eval", "-"), CopyQ("copyq", session = "cvtest").command(listOf("eval", "-")))

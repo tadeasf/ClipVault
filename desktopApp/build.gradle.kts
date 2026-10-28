@@ -14,6 +14,8 @@ dependencies {
     implementation(libs.kotlinx.coroutinesCore)
     implementation(libs.dbus.java.core) // GNOME extension fallback capture
     implementation(libs.dbus.java.transport)
+    implementation(libs.zxing.core) // pairing QR in the terminal and as PNG (pairing.md section 5)
+    implementation(libs.jmdns) // pairing=1 advertisement and `pair --join` discovery
     runtimeOnly(libs.slf4j.nop) // dbus-java logs through slf4j; without a provider it prints a warning on every start
 
     // Only the runtime, which the Compose compiler plugin insists on. compose.desktop.currentOs (Skia natives,

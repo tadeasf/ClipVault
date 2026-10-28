@@ -23,12 +23,18 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.withContext
 
+/**
+ * [deviceId] is read inside each write transaction, so a device id that changes while the repository is
+ * in use (enabling sync relabels it, design.md 5.3.1) applies atomically from the next write on.
+ */
 class SqlClipRepository(
     private val db: ClipDatabase,
-    private val deviceId: String,
+    private val deviceId: () -> String,
     private val now: () -> Long,
     private val io: CoroutineContext,
 ) : ClipRepository {
+    constructor(db: ClipDatabase, deviceId: String, now: () -> Long, io: CoroutineContext) : this(db, { deviceId }, now, io)
+
     private val clips get() = db.clipQueries
     private val meta get() = db.metaEventQueries
     private val members get() = db.clipMemberQueries
@@ -55,8 +61,9 @@ class SqlClipRepository(
         val categories = SensitiveDetector.classify(draft.content, draft.hints)
         val sensitive = categories.isNotEmpty()
         val (createdAt, clock, seq) = Triple(now(), log.tick(), log.nextSeq())
-        clips.insert(id, deviceId, createdAt, type, hash, draft.content, sensitive, clock, seq, categories, draft.hints.sourcePackage)
-        members.insert(id, id, deviceId, createdAt, clock, seq)
+        val author = deviceId()
+        clips.insert(id, author, createdAt, type, hash, draft.content, sensitive, clock, seq, categories, draft.hints.sourcePackage)
+        members.insert(id, id, author, createdAt, clock, seq)
         return InsertResult(id, duplicate = false, sensitive = sensitive)
     }
 
@@ -105,7 +112,8 @@ class SqlClipRepository(
     /** A row may hold several members (same content copied on several devices): the change applies to each live one. */
     private suspend fun appendMeta(id: String, field: MetaField, value: Boolean) = withContext(io) {
         db.transaction {
-            log.liveMembers(id).forEach { meta.insert(log.nextSeq(), it.id, field, value, log.tick(), deviceId) }
+            val author = deviceId()
+            log.liveMembers(id).forEach { meta.insert(log.nextSeq(), it.id, field, value, log.tick(), author) }
             log.refold(id)
         }
     }

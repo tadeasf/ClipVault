@@ -13,6 +13,10 @@ private const val USAGE = """Usage: clipvault-agent [--session NAME] <command>
   install-copyq --check-encryption
                               is CopyQ's history encrypted on disk? (reports only; exit 1 if not)
   install-service             install and start the systemd user service
+  pair                        pair a phone: show a QR code (2 minutes, one use)
+  pair --code                 pair another desktop: show a 6-digit code
+  pair --join [--addr H:P]    pair with a desktop showing a code (found by mDNS, or at H:P)
+                              pair options: --listen ADDR (address to use), --name NAME
   config [KEY [VALUE]]        promote_to_clipboard on|off, scrub_copyq_sensitive on|off,
                               copyq_tab NAME|default, exclude TITLE, unexclude TITLE
   --session NAME              talk to CopyQ session NAME (copyq -s NAME) instead of the default"""
@@ -42,6 +46,7 @@ class Cli(private val paths: AgentPaths, private val copyq: CopyQ) {
         }
         "install-service" -> agentBinary()?.let { SystemdUnit.install(it) } ?: noLauncher()
         "config" -> config(args.drop(1))
+        "pair" -> PairCommand(paths).run(args.drop(1))
         "--help", "-h", "help" -> println(USAGE).let { 0 }
         else -> usage()
     }

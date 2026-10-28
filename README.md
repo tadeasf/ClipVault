@@ -65,6 +65,8 @@ clipvault-agent status
   or the keyring without an explicit yes, a timestamped backup to
   `~/clipvault-backups/<app>-<timestamp>/` before any such change, and "verified" only for things
   that were actually run.
+- Tests never start a keyring daemon on a developer's machine. The Secret Service integration test
+  runs in CI only; local test runs can't reach a session bus at all (see the root `build.gradle.kts`).
 
 ## Modules
 

@@ -11,7 +11,7 @@ class Peer(val publicKey: ByteArray, val name: String, val firstSeen: Long, val 
  * This device's identity and its paired peers, in the encrypted SyncDatabase (pairing.md sections 3
  * and 4). The identity is created only by [enableSync].
  */
-class PeerStore(private val db: SyncDatabase, private val c: Crypto, private val now: () -> Long) {
+class PeerStore(private val db: SyncDatabase, private val c: Crypto, internal val now: () -> Long) {
     private val q get() = db.syncQueries
 
     fun identity(): LocalIdentity? = q.identity().executeAsOneOrNull()?.let { LocalIdentity(it, c) }
@@ -76,6 +76,8 @@ class PeerStore(private val db: SyncDatabase, private val c: Crypto, private val
 fun enableSync(clipDb: ClipDatabase, peers: PeerStore, c: Crypto): String {
     val identity = peers.identity() ?: run {
         check(!peers.syncedAnything()) { "sync state exists without an identity" }
+        // Own clips from before this moment are never sent (protocol.md section 10).
+        clipDb.settingQueries.put(ENABLED_AT_KEY, peers.now().toString())
         peers.createIdentity()
     }
     val derived = deviceIdOf(c, identity.publicKey)
@@ -93,6 +95,11 @@ fun enableSync(clipDb: ClipDatabase, peers: PeerStore, c: Crypto): String {
     }
     return derived
 }
+
+/** When sync was enabled on this device: SyncConfig.syncEnabledAt. Null while sync was never enabled. */
+fun syncEnabledAt(clipDb: ClipDatabase): Long? = clipDb.settingQueries.get(ENABLED_AT_KEY).executeAsOneOrNull()?.toLongOrNull()
+
+private const val ENABLED_AT_KEY = "sync.enabledAt"
 
 // Same key as cz.tadeasf.clipvault.settings.deviceId(), which keeps returning the stored id.
 private const val DEVICE_ID_KEY = "deviceId"

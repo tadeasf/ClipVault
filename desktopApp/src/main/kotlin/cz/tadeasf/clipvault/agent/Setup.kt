@@ -8,14 +8,19 @@ import cz.tadeasf.clipvault.security.SecretServiceKeyring
 import cz.tadeasf.clipvault.security.keyFor
 import cz.tadeasf.clipvault.storage.JvmDriverFactory
 import cz.tadeasf.clipvault.storage.clipDatabase
+import cz.tadeasf.clipvault.sync.db.SyncDatabase
 import java.io.File
+import java.io.IOException
 import java.sql.SQLException
 
 /**
  * Opens the encrypted store. Key from the Secret Service; without one, the passphrase file, which needs
  * a terminal to ask in. A headless daemon (systemd) without a keyring fails with a clear message.
  */
-fun openStore(paths: AgentPaths): ClipDatabase {
+fun openStore(paths: AgentPaths): ClipDatabase = openStores(paths, withSync = false).first
+
+/** The history store and, with [withSync], the sync bookkeeping store; one key for both. */
+fun openStores(paths: AgentPaths, withSync: Boolean = true): Pair<ClipDatabase, SyncDatabase?> {
     paths.prepare()
     val keyFile = PassphraseKeyFile(paths.keyFile, ::askPassphrase)
     val provider = DesktopDbKeyProvider(SecretServiceKeyring.detect(), keyFile)
@@ -24,9 +29,11 @@ fun openStore(paths: AgentPaths): ClipDatabase {
         provider.keyFor(drivers.exists())
     } catch (_: KeyUnavailableException) {
         throw StoreKeyException.missing(paths)
+    } catch (e: IOException) {
+        throw StoreKeyException.locked(e.message)
     }
     return try {
-        clipDatabase(drivers.open(key))
+        clipDatabase(drivers.open(key)) to if (withSync) SyncDatabase(JvmDriverFactory(paths.syncDatabase, SyncDatabase.Schema).open(key)) else null
     } catch (e: SQLException) {
         if (e.message?.contains("SQLITE_NOTADB") == true) throw StoreKeyException.wrong(paths) else throw e
     }
@@ -46,6 +53,11 @@ class StoreKeyException(message: String) : Exception(message) {
 
         fun missing(paths: AgentPaths) = StoreKeyException(
             "clipvault-agent: the history store exists but its key is not in the keyring (keyring replaced or reset?). ${advice(paths)}",
+        )
+
+        fun locked(detail: String?) = StoreKeyException(
+            "clipvault-agent: the keyring did not hand out the store key ($detail). Unlock the keyring, then " +
+                "`systemctl --user restart clipvault-agent`. Not restarting on my own.",
         )
 
         fun wrong(paths: AgentPaths) = StoreKeyException(
