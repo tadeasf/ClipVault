@@ -23,14 +23,17 @@ import kotlinx.coroutines.launch
 /** Process-wide objects, created on first use. Every capture path and the UI share one database. */
 class AppGraph(private val app: Application) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val io = Dispatchers.IO
+    private val io = flavorDbDispatcher()
 
-    val db: ClipDatabase by lazy {
-        val drivers = AndroidDriverFactory(app)
-        clipDatabase(drivers.open(KeystoreDbKeyProvider(app).keyFor(drivers.exists())))
-    }
+    private val drivers by lazy { AndroidDriverFactory(app) }
+
+    /** The store key; the sync flavor opens its bookkeeping database with it too (protocol.md section 12). */
+    val dbKey: ByteArray by lazy { KeystoreDbKeyProvider(app).keyFor(drivers.exists()) }
+    val db: ClipDatabase by lazy { clipDatabase(drivers.open(dbKey)) }
     val settings by lazy { SqlSettingsRepository(db, io) }
-    val repository by lazy { SqlClipRepository(db, deviceId(db), System::currentTimeMillis, io) }
+
+    // The device id is read per write: enabling sync replaces it with the identity-derived one (design 5.3.1).
+    val repository by lazy { flavorRepository(app, SqlClipRepository(db, { deviceId(db) }, System::currentTimeMillis, io)) }
     val ingest by lazy { ClipIngest(repository) { it.sourcePackage in settings.settings.value.excludedPackages } }
 
     /** Capture entry used by every path: ingest, then housekeeping. */
@@ -39,6 +42,7 @@ class AppGraph(private val app: Application) {
         if (result is IngestResult.Stored) {
             settings.update { it.copy(lastCaptureAt = System.currentTimeMillis()) }
             if (result.sensitive) RetentionAlarm.schedule(app, settings.settings.value.sensitiveTtlSeconds)
+            flavorLocalClip(app)
         }
         applyRetention()
         return result
@@ -48,6 +52,7 @@ class AppGraph(private val app: Application) {
 
     /** Keeps the capture notification in line with the setting, now and on every change. */
     fun start() = scope.launch(io) {
+        flavorStart(app, this@AppGraph)
         applyRetention()
         settings.settings.distinctUntilChangedBy { it.captureNotification }.collect {
             CaptureNotification.sync(app, it.captureNotification)

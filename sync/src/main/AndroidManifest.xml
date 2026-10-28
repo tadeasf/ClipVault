@@ -6,5 +6,26 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <!-- Runtime permission enforced for targetSdk 37+ (Android 17 local network protection). -->
     <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+    <!-- The live connection while the screen is on (design 6.2: dataSync is capped at 6 h / 24 h). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Scanning a pairing QR code; asked when the user picks "Scan". -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- Wi-Fi allowlist only: Android shows the SSID to apps with location permission. Asked when it is turned on. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+
+    <application>
+        <service
+            android:name=".SyncService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps an end-to-end encrypted LAN connection to the user's own paired devices open, so clipboard history syncs live while the screen is on and for 5 minutes after the last clip. No dataSync type: it is capped at 6 h per 24 h, and no other type covers a live peer-to-peer connection." />
+        </service>
+    </application>
 
 </manifest>

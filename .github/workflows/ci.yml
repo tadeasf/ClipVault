@@ -56,7 +56,7 @@ jobs:
         run: ./gradlew :androidApp:assembleVaultDebug :androidApp:assembleSyncDebug :androidApp:assembleVaultDebugAndroidTest :desktopApp:jar
 
       - name: Desktop agent tests
-        run: ./gradlew :desktopApp:test
+        run: ./gradlew :desktopApp:test :sync:testDebugUnitTest
 
       # .rpm, .deb (with Recommends: copyq) and AppImage of clipvault-agent
       - name: Package desktop agent

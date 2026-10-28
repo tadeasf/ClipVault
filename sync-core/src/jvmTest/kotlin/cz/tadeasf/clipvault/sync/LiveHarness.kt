@@ -64,6 +64,8 @@ class LiveNet(vararg ids: String, private val pageSize: Long = 100) : AutoClosea
     val nodes = mutableMapOf<String, SyncNode>()
     private val discoverable = ids.associateWith { mutableSetOf<String>() }
     val logs = java.util.concurrent.ConcurrentLinkedQueue<String>()
+    /** Every advertise call: (node, pairing flag). */
+    val advertised = java.util.concurrent.ConcurrentLinkedQueue<Pair<String, Boolean>>()
 
     init {
         ids.forEach { id ->
@@ -86,7 +88,9 @@ class LiveNet(vararg ids: String, private val pageSize: Long = 100) : AutoClosea
 
     fun start(id: String): SyncNode {
         val discovery = object : Discovery {
-            override fun advertise(port: Int) = Unit
+            override fun advertise(port: Int, pairing: Boolean) {
+                advertised += id to pairing
+            }
             override suspend fun candidates() = discoverable.getValue(id).mapNotNull { other -> nodes[other]?.listeningPort?.let { "127.0.0.1:$it" } }
             override fun close() = Unit
         }

@@ -61,6 +61,10 @@ data class Hello(
     val maxPayloadBytes: Long = DEFAULT_MAX_PAYLOAD,
     /** 1.2, informational: when the sender enabled sync (its own older clips are never sent). */
     val syncEnabledAt: Long? = null,
+    /** 1.3: the sender's current device name, so a rename reaches paired peers; untrusted, sanitised on receipt. */
+    val name: String? = null,
+    /** 1.3: the port the sender listens on; the receiver dials the sender's address with it next time. */
+    val port: Int? = null,
 ) : Message
 
 /** [onlySensitive] non-null: a re-scan from [sinceSeq] limited to sensitive clips of these categories (section 10). */

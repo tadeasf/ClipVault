@@ -11,6 +11,7 @@ import cz.tadeasf.clipvault.sync.crypto.crypto
 import cz.tadeasf.clipvault.sync.pairing.PairingWindows
 import cz.tadeasf.clipvault.sync.pairing.PeerStore
 import cz.tadeasf.clipvault.sync.pairing.enableSync
+import cz.tadeasf.clipvault.sync.pairing.loadSyncPrefs
 import cz.tadeasf.clipvault.sync.pairing.syncEnabledAt
 import cz.tadeasf.clipvault.sync.secure.ConfirmRequest
 import cz.tadeasf.clipvault.sync.secure.HandshakeGuard
@@ -49,7 +50,7 @@ class PairCommand(
 
     fun run(args: List<String>): Int {
         val listen = args.valueAfter("--listen")?.let(InetAddress::getByName)
-        val name = args.valueAfter("--name") ?: hostname()
+        val name = args.valueAfter("--name")
         return when {
             "--join" in args -> join(args.valueAfter("--addr"), listen, name)
             else -> show(byCode = "--code" in args, listen, name)
@@ -60,15 +61,17 @@ class PairCommand(
 
     private class Ctx(val endpoint: SecureEndpoint, val windows: PairingWindows)
 
-    private fun setup(name: String): Ctx {
+    private fun setup(name: String?): Ctx {
         val (clips, sync) = openStores(paths)
         val peers = PeerStore(sync!!, c, now)
         val first = peers.identity() == null
         val deviceId = enableSync(clips, peers, c)
         if (first) out.println("Sync enabled on this device (device id $deviceId).")
-        val node = SyncEngine(clips, sync, SyncConfig(deviceId, syncEnabledAt = syncEnabledAt(clips) ?: now()))
+        // listenPort: the daemon's, so the new peer reconnects to the daemon without mDNS (protocol 1.3).
+        val node = SyncEngine(clips, sync, SyncConfig(deviceId, syncEnabledAt = syncEnabledAt(clips) ?: now(), listenPort = loadSyncPrefs(clips).port))
         val windows = PairingWindows(c, now)
-        return Ctx(SecureEndpoint(c, node, peers, windows, HandshakeGuard(now), now, name, ::askWords), windows)
+        val endpointName = name ?: loadSyncPrefs(clips).name ?: hostname()
+        return Ctx(SecureEndpoint(c, node, peers, windows, HandshakeGuard(now), now, endpointName, ::askWords), windows)
     }
 
     private fun askWords(request: ConfirmRequest) {
@@ -84,7 +87,7 @@ class PairCommand(
 
     // --- responder: QR or code ---
 
-    private fun show(byCode: Boolean, listen: InetAddress?, name: String): Int {
+    private fun show(byCode: Boolean, listen: InetAddress?, name: String?): Int {
         val addresses = listen?.let(::listOf) ?: siteLocalAddresses().map(InetAddress::getByName)
         if (addresses.isEmpty()) return fail("No site-local network address to listen on (use --listen ADDR).")
         val ctx = setup(name)
@@ -133,7 +136,7 @@ class PairCommand(
 
     // --- initiator: join by code ---
 
-    private fun join(addr: String?, listen: InetAddress?, name: String): Int {
+    private fun join(addr: String?, listen: InetAddress?, name: String?): Int {
         val target = addr?.let(::parseHostPort) ?: discover(listen) ?: return fail(
             "No device showing a pairing code was found on the local network (mDNS, 10 s).\n" +
                 "If the other desktop does show a code, mDNS is probably blocked (firewall, UDP 5353): run\n" +

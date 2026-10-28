@@ -51,14 +51,18 @@ import cz.tadeasf.clipvault.ui.glyph
 import cz.tadeasf.clipvault.ui.label
 import cz.tadeasf.clipvault.ui.preview
 import cz.tadeasf.clipvault.ui.relativeTime
+import cz.tadeasf.clipvault.ui.sync.SyncIndicator
+import cz.tadeasf.clipvault.ui.sync.SyncSnapshot
+import kotlinx.coroutines.flow.StateFlow
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
-/** [navigate] with an id opens that clip; with null opens settings. */
+/** [navigate] with an id opens that clip; with null opens settings. [syncState] is null without sync. */
 @Composable
 fun HistoryScreen(
     viewModel: HistoryViewModel,
     platform: Platform,
+    syncState: StateFlow<SyncSnapshot>?,
     sourceIcon: @Composable (String) -> Unit,
     navigate: (String?) -> Unit,
 ) {
@@ -70,7 +74,7 @@ fun HistoryScreen(
     }
     Scaffold(snackbarHost = { SnackbarHost(snackbar) }, modifier = Modifier.safeDrawingPadding()) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-            Header(onSettings = { navigate(null) })
+            Header(syncState?.collectAsState()?.value?.indicator, onSettings = { navigate(null) })
             when (val current = state) {
                 HistoryState.Loading -> Unit
                 HistoryState.Empty -> EmptyState(platform.requestAddTile)
@@ -81,9 +85,10 @@ fun HistoryScreen(
 }
 
 @Composable
-private fun Header(onSettings: () -> Unit) {
+private fun Header(sync: SyncIndicator?, onSettings: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(16.dp, 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Text("ClipVault", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+        sync?.let { Text(it.label(), style = MaterialTheme.typography.labelMedium, modifier = Modifier.testTag("syncIndicator")) }
         TextButton(onClick = onSettings) { Text("Settings") }
     }
 }
@@ -197,4 +202,11 @@ private fun EmptyState(requestAddTile: (() -> Unit)?) {
         Text("Optional: automatic capture via Accessibility (Settings explains the trade-offs).")
         requestAddTile?.let { add -> TextButton(onClick = add) { Text("Add the Quick Settings tile") } }
     }
+}
+
+private fun SyncIndicator.label(): String = when (this) {
+    SyncIndicator.SYNCED -> "Synced"
+    SyncIndicator.SYNCING -> "Syncing…"
+    SyncIndicator.OFF -> "Sync off"
+    SyncIndicator.ERROR -> "Sync error"
 }

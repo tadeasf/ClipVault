@@ -7,6 +7,7 @@ import cz.tadeasf.clipvault.sync.pairing.PeerStore
 import cz.tadeasf.clipvault.sync.pairing.deviceIdOf
 import cz.tadeasf.clipvault.sync.secure.ChannelClosed
 import cz.tadeasf.clipvault.sync.secure.LengthFramer
+import cz.tadeasf.clipvault.sync.secure.PairBy
 import cz.tadeasf.clipvault.sync.secure.SecureConnection
 import cz.tadeasf.clipvault.sync.secure.SecureEndpoint
 import kotlin.random.Random
@@ -20,6 +21,8 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -42,6 +45,9 @@ data class PeerStatus(
     /** Whether this side dialled the current connection; null when not connected. */
     val initiatedHere: Boolean? = null,
 )
+
+/** A pairing connection ended (step 8): [peerName] once paired, otherwise why it failed. */
+class PairingEnd(val peerName: String?, val reason: String?)
 
 /** Timing knobs; tests shorten them. */
 data class NodeTiming(
@@ -121,6 +127,16 @@ class SyncNode(
     private var listener: Listener? = null
     private var bound: List<String> = emptyList()
     private var boundPort: Int? = null
+    private var advertisedPairing = false
+
+    // listen() suspends: without this, the start-up bind and a network callback's bind both open a listener.
+    private val rebinding = Mutex()
+
+    /** Called with the port after every (re)bind; hosts persist it and pass it back as `port` on the next start. */
+    var onListening: ((Int) -> Unit)? = null
+
+    /** Called on the node's dispatcher when a pairing connection (either role) pairs or fails. */
+    var onPairingEnded: ((PairingEnd) -> Unit)? = null
 
     /** Total connections ever opened (simultaneous-connect and flapping tests). */
     var connectionsOpened = 0
@@ -179,9 +195,43 @@ class SyncNode(
 
     /** New settings (opt-ins, syncEnabledAt...): live sessions end with Bye and reconnect at once. */
     suspend fun reconfigure(config: SyncConfig) = withContext(dispatcher) {
-        engine.config = config
+        engine.config = config.copy(listenPort = boundPort)
         // progress() at once: a dial round must not see the closing connection as still busy.
         connections.filter { it.established }.toList().forEach { it.secure.finish("settings changed"); progress(it) }
+        sessions.values.forEach { it.backoffUntil = 0 }
+    }
+
+    /**
+     * Runs [block] on the node's dispatcher, then lets connections move on. For whatever touches the endpoint
+     * from outside: pairing windows, the answer to the fingerprint words.
+     */
+    suspend fun <T> run(block: () -> T): T = withContext(dispatcher) {
+        block().also { connections.toList().forEach(::progress) }
+    }
+
+    /** Dials [address] in a pairing mode; the outcome arrives through [onPairingEnded]. False if the connect fails. */
+    suspend fun pair(address: String, by: PairBy): Boolean = withContext(dispatcher) {
+        val link = try {
+            network.connect(address)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log("sync: pairing connect to $address failed (${e::class.simpleName})")
+            return@withContext false
+        }
+        startConnection(link, outbound = true, pairBy = by)
+        true
+    }
+
+    /**
+     * The device's network changed (Android's NetworkCallback): rebind now rather than at the next poll. If the
+     * addresses changed, open connections ran over the old network, so they are dropped. Either way every
+     * peer is dialled again without waiting out its backoff.
+     */
+    suspend fun networkChanged() = withContext(dispatcher) {
+        val before = bound
+        rebindIfChanged()
+        if (bound != before) connections.toList().forEach { it.link.close() }
         sessions.values.forEach { it.backoffUntil = 0 }
     }
 
@@ -222,6 +272,12 @@ class SyncNode(
     }
 
     private fun tick() {
+        // pairing.md 5: `pairing=1` in the TXT record exactly while a code is shown.
+        val pairing = endpoint.windows.codeOpen
+        if (pairing != advertisedPairing) boundPort?.let {
+            advertisedPairing = pairing
+            discovery.advertise(it, pairing)
+        }
         connections.toList().forEach {
             it.secure.tick()
             progress(it)
@@ -234,13 +290,13 @@ class SyncNode(
         paired.forEach { (id, peer) -> sessions.getOrPut(id) { PeerSession(peer) }.peer = peer }
     }
 
-    private suspend fun rebindIfChanged() {
+    private suspend fun rebindIfChanged(): Unit = rebinding.withLock {
         val addresses = listenAddresses()
-        if (addresses == bound && listener != null) return
+        if (addresses == bound && listener != null) return@withLock
         listener?.close()
         listener = null
         bound = addresses
-        if (addresses.isEmpty()) return
+        if (addresses.isEmpty()) return@withLock
         val l = try {
             network.listen(addresses, boundPort ?: port)
         } catch (_: Exception) {
@@ -248,7 +304,9 @@ class SyncNode(
         }
         listener = l
         boundPort = l.port
-        discovery.advertise(l.port)
+        engine.config = engine.config.copy(listenPort = l.port)
+        onListening?.invoke(l.port)
+        discovery.advertise(l.port, advertisedPairing)
         log("sync: listening on port ${l.port} (${addresses.size} address(es))")
         scope.launch {
             while (true) {
@@ -298,12 +356,12 @@ class SyncNode(
 
     // --- connections ---
 
-    private fun startConnection(link: Link, outbound: Boolean): Conn {
+    private fun startConnection(link: Link, outbound: Boolean, pairBy: PairBy? = null): Conn {
         val conn = Conn(link, outbound)
         connectionsOpened++
         connections += conn
         conn.secure = if (outbound) {
-            SecureConnection.dial(endpoint, link.remote) { conn.outbox.trySend(it) }
+            SecureConnection.dial(endpoint, link.remote, pairBy) { conn.outbox.trySend(it) }
         } else {
             SecureConnection.accept(endpoint, hostOf(link.remote)) { conn.outbox.trySend(it) }
         }
@@ -340,6 +398,7 @@ class SyncNode(
         val key = conn.secure.peerKey!!
         val id = deviceIdOf(endpoint.crypto, key)
         conn.peerId = id
+        if (conn.secure.pairing) onPairingEnded?.invoke(PairingEnd(peers.peer(key)?.name ?: "unnamed device", null))
         refreshPeers()
         peers.seen(key)
         if (conn.outbound) {
@@ -367,6 +426,7 @@ class SyncNode(
         conn.ended = true
         connections -= conn
         conn.outbox.close()
+        if (!conn.established && conn.secure.pairing) onPairingEnded?.invoke(PairingEnd(null, conn.secure.closeReason ?: "connection closed"))
         if (!conn.established) log("sync: ${if (conn.outbound) "outbound" else "inbound"} handshake with ${hostOf(conn.link.remote)} ended: ${conn.secure.failure ?: conn.secure.closeReason}")
         val session = conn.peerId?.let(sessions::get) ?: return
         conn.secure.peerKey?.let(peers::seen)

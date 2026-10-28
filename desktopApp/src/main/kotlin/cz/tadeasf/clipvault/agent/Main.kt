@@ -1,5 +1,8 @@
 package cz.tadeasf.clipvault.agent
 
+import cz.tadeasf.clipvault.detect.SensitiveCategory
+import cz.tadeasf.clipvault.sync.pairing.loadSyncPrefs
+import cz.tadeasf.clipvault.sync.pairing.saveSyncPrefs
 import kotlin.system.exitProcess
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -21,7 +24,9 @@ private const val USAGE = """Usage: clipvault-agent [--session NAME] <command>
   unpair NAME|ID              unpair a device (by name or device id prefix)
                               pair options: --listen ADDR (address to use), --name NAME
   config [KEY [VALUE]]        promote_to_clipboard on|off, scrub_copyq_sensitive on|off,
-                              copyq_tab NAME|default, exclude TITLE, unexclude TITLE
+                              copyq_tab NAME|default, exclude TITLE, unexclude TITLE,
+                              name NAME|default (this device's sync name),
+                              sync_sensitive CAT[,CAT...]|none (sensitive categories to accept)
   --session NAME              talk to CopyQ session NAME (copyq -s NAME) instead of the default"""
 
 fun main(args: Array<String>) {
@@ -117,6 +122,8 @@ class Cli(private val paths: AgentPaths, private val copyq: CopyQ) {
 
     private fun config(args: List<String>): Int {
         val state = local().state
+        val db = local().db
+        val prefs = loadSyncPrefs(db)
         when (args.getOrNull(0)) {
             null -> Unit
             "promote_to_clipboard" -> state.promoteToClipboard = args.getOrNull(1) == "on"
@@ -124,12 +131,17 @@ class Cli(private val paths: AgentPaths, private val copyq: CopyQ) {
             "copyq_tab" -> state.copyqTab = args.getOrNull(1)?.takeUnless { it == "default" }
             "exclude" -> state.excludedTitles += args.getOrNull(1) ?: return usage()
             "unexclude" -> state.excludedTitles -= args.getOrNull(1) ?: return usage()
+            "name" -> saveSyncPrefs(db, prefs.copy(name = (args.getOrNull(1) ?: return usage()).takeUnless { it == "default" }))
+            "sync_sensitive" -> saveSyncPrefs(db, prefs.copy(sensitiveOptIn = sensitiveCategories(args.getOrNull(1) ?: return usage()) ?: return usage()))
             else -> return usage()
         }
+        val sync = loadSyncPrefs(db)
         println("promote_to_clipboard=${if (state.promoteToClipboard) "on" else "off"}")
         println("scrub_copyq_sensitive=${if (state.scrubSensitive) "on" else "off"}")
         println("copyq_tab=${state.copyqTab ?: "default (CopyQ clipboard tab)"}")
         println("exclusions=${state.excludedTitles.joinToString(", ").ifEmpty { "none" }}")
+        println("name=${sync.name ?: "default (${hostname()})"}")
+        println("sync_sensitive=${sync.sensitiveOptIn.map { it.name.lowercase() }.sorted().joinToString(",").ifEmpty { "none" }}")
         return 0
     }
 
@@ -166,4 +178,11 @@ class Cli(private val paths: AgentPaths, private val copyq: CopyQ) {
         System.err.println(message)
         return code
     }
+}
+
+/** `none`, or comma-separated category names (case-insensitive, never UNKNOWN); null on an unknown name. */
+fun sensitiveCategories(arg: String): Set<SensitiveCategory>? {
+    if (arg.equals("none", ignoreCase = true)) return emptySet()
+    val allowed = SensitiveCategory.entries - SensitiveCategory.UNKNOWN
+    return arg.split(',').map { n -> allowed.find { it.name.equals(n.trim(), ignoreCase = true) } ?: return null }.toSet()
 }

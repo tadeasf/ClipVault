@@ -18,6 +18,10 @@ data class SyncConfig(
     /** Excluded source apps by package/window title; applies to own clips. */
     val isExcludedSource: (String?) -> Boolean = { false },
     val pageSize: Long = 100,
+    /** This device's name, sent in Hello (protocol 1.3). */
+    val name: String? = null,
+    /** Where this device listens, sent in Hello (1.3); the node fills it in after binding. */
+    val listenPort: Int? = null,
 )
 
 /**

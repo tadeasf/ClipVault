@@ -154,6 +154,25 @@ class SyncNodeTest {
     }
 
     @Test
+    fun aRenameReconnectsAndThePeerStoresTheNameFromHello() = runBlocking<Unit> {
+        LiveNet("A", "B").use { net ->
+            net.pair("A", "B")
+            net.sees("B", "A")
+            net.start("A")
+            net.start("B")
+            eventually(message = { "never live" }) { net.status("B", "A").state == PeerState.LIVE }
+            val before = net.nodes.getValue("B").connectionsOpened
+            val config = net.secure["B"].device.node.config.copy(name = "Renamed‮ B")
+            net.nodes.getValue("B").reconfigure(config)
+            eventually(message = { "A still calls B ${net.secure["A"].peers.peers().single().name}" }) {
+                net.secure["A"].peers.peers().single().name == "Renamed B"
+            }
+            eventually(message = { "no reconnect" }) { net.nodes.getValue("B").connectionsOpened > before && net.status("B", "A").state == PeerState.LIVE }
+            println("rename: Bye + reconnect, A stores the sanitized name from Hello")
+        }
+    }
+
+    @Test
     fun sixteenCoroutinesHammerOneNodeWithoutInterleavingAndConverge() = runBlocking<Unit> {
         LiveNet("A", "B").use { net ->
             net.pair("A", "B")
@@ -201,7 +220,10 @@ class SyncNodeTest {
             val before = net.nodes.getValue("B").connectionsOpened
             net.networks.getValue("A").corruptWrite = 3
             net.write("A", (1..20).map { "frame $it" })
-            eventually(message = { "no failure seen: ${net.status("B", "A")}" }) { net.status("B", "A").lastError == "frame authentication failed" }
+            // Since Hello.port (1.3) A knows B's address too and may redial first; then B records no error.
+            eventually(message = { "no failure seen: ${net.status("B", "A")}" }) {
+                net.status("B", "A").lastError == "frame authentication failed" || net.nodes.getValue("B").connectionsOpened > before
+            }
             net.secure.clock += 2_000
             eventually(message = { "B has ${net.texts("B").size} of 20" }) { net.texts("B").size == 20 }
             assertTrue(net.nodes.getValue("B").connectionsOpened > before)

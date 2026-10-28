@@ -13,6 +13,8 @@ import cz.tadeasf.clipvault.sync.node.TcpNetwork
 import cz.tadeasf.clipvault.sync.pairing.Peer
 import cz.tadeasf.clipvault.sync.pairing.PairingWindows
 import cz.tadeasf.clipvault.sync.pairing.PeerStore
+import cz.tadeasf.clipvault.sync.pairing.loadSyncPrefs
+import cz.tadeasf.clipvault.sync.pairing.saveSyncPort
 import cz.tadeasf.clipvault.sync.pairing.syncEnabledAt
 import cz.tadeasf.clipvault.sync.secure.HandshakeGuard
 import cz.tadeasf.clipvault.sync.secure.SecureEndpoint
@@ -39,14 +41,45 @@ class SyncHost(private val clips: ClipDatabase, private val sync: SyncDatabase, 
 
     val running: Boolean get() = node != null
 
+    /** What the running config was built from; SyncConfig holds a lambda, so it can't be compared itself. */
+    private var configKey = config().second
+
+    internal var reconfigure: suspend (SyncConfig) -> Unit = { node?.reconfigure(it) }
+
     /** Called at start and from housekeeping. */
     fun startIfReady() {
         if (node != null || peers.identity() == null || peers.peers().isEmpty()) return
-        val config = SyncConfig(deviceId(clips), syncEnabledAt = syncEnabledAt(clips) ?: now())
+        val (config, key) = config()
+        configKey = key
         val engine = SyncEngine(clips, sync, config).also { engine = it }
         engine.onRemoteClip = { core.state.enqueue(it) } // flushed to CopyQ by housekeeping
-        val endpoint = SecureEndpoint(c, engine, peers, PairingWindows(c, now), HandshakeGuard(now), now, hostname()) { it.answer(false) }
-        node = SyncNode(endpoint, TcpNetwork(), JmdnsDiscovery(c), ::siteLocalAddresses, scope, log = ::println).also { it.start() }
+        val endpoint = SecureEndpoint(c, engine, peers, PairingWindows(c, now), HandshakeGuard(now), now, config.name!!) { it.answer(false) }
+        node = SyncNode(endpoint, TcpNetwork(), JmdnsDiscovery(c), ::siteLocalAddresses, scope, port = loadSyncPrefs(clips).port ?: 0, log = ::println).also {
+            it.onListening = { port -> saveSyncPort(clips, port) }
+            it.start()
+        }
+    }
+
+    /** From housekeeping: `config` runs in its own process, so a settings change is noticed here (within 5 s). */
+    suspend fun refreshConfig() {
+        val (config, key) = config()
+        if (key == configKey) return
+        configKey = key
+        reconfigure(config)
+    }
+
+    private fun config(): Pair<SyncConfig, List<Any?>> {
+        val prefs = loadSyncPrefs(clips)
+        val enabledAt = syncEnabledAt(clips)
+        val name = prefs.name ?: hostname()
+        val config = SyncConfig(
+            deviceId(clips),
+            syncEnabledAt = enabledAt ?: now(),
+            sensitiveOptIn = prefs.sensitiveOptIn,
+            isExcludedSource = core.state::isExcluded,
+            name = name,
+        )
+        return config to listOf(enabledAt, prefs.sensitiveOptIn, name, core.state.excludedTitles)
     }
 
     suspend fun <T> write(block: suspend () -> T): T = node?.write(block) ?: block()
@@ -101,12 +134,13 @@ class JmdnsDiscovery(private val c: cz.tadeasf.clipvault.sync.crypto.Crypto) : D
     private var instances: List<JmDNS> = emptyList()
     private val instance = "cv-" + c.randomBytes(4).toHexString()
 
-    override fun advertise(port: Int) {
+    override fun advertise(port: Int, pairing: Boolean) {
         close()
+        val txt = if (pairing) mapOf("v" to "1", "pairing" to "1") else mapOf("v" to "1")
         instances = siteLocalAddresses().mapNotNull { address ->
             runCatching {
                 JmDNS.create(InetAddress.getByName(address), "clipvault-sync").apply {
-                    registerService(ServiceInfo.create(SERVICE_TYPE, instance, port, 0, 0, mapOf("v" to "1")))
+                    registerService(ServiceInfo.create(SERVICE_TYPE, instance, port, 0, 0, txt))
                 }
             }.getOrNull()
         }

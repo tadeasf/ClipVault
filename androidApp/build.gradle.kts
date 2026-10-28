@@ -74,6 +74,11 @@ android {
 dependencies {
     implementation(project(":ui"))
     "syncImplementation"(project(":sync"))
+    "syncImplementation"(libs.androidx.camera.camera2) // pairing QR scanner
+    "syncImplementation"(libs.androidx.camera.lifecycle)
+    "syncImplementation"(libs.androidx.camera.view)
+    "syncImplementation"(libs.androidx.lifecycle.runtimeCompose) // LocalLifecycleOwner for CameraX
+    "androidTestSyncImplementation"(libs.androidx.work.testing)
 
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.core.ktx) // Drawable.toBitmap for source-app icons

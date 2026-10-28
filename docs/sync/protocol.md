@@ -307,6 +307,30 @@ discovery.
 - A settings change reconnects. A session records the opt-ins it announced, so a gain triggers
   the `onlySensitive` re-scan on the next session.
 
+**Settings changes (step 8, protocol 1.3):**
+- From 1.3, Hello also carries `name`, the device's current name (`sync.name`, else the platform
+  default). In a SESSION handshake the receiver stores it, sanitized like an Identity name
+  (pairing.md section 3), as the peer's name. After pairing, the name from Identity stays.
+- A change to the sync-relevant settings (opt-ins, name, exclusions, `syncEnabledAt`) calls
+  `SyncNode.reconfigure`: each live session ends with `Bye("settings changed")` and reconnects at
+  once, so peers see the new Hello.
+- The desktop's `clipvault-agent config` runs in its own process and only writes the store. The
+  daemon's housekeeping loop rebuilds the config from settings every 5 s and reconfigures when it
+  differs, so a change reaches peers within about 5 s.
+- The phone (Android) applies its settings at once: the runtime calls `reconfigure` on every change.
+
+**Unicast reconnects (step 8, protocol 1.3):**
+- Hello also carries `port`, the port the sender listens on. The receiver stores the sender's IP
+  with that port as the peer's last address, which dial rounds try next to the mDNS candidates.
+- A node reuses its last port (`sync.port`) when it can, and `clipvault-agent pair` announces the
+  daemon's port. So after QR pairing, which needs no mDNS, both sides find each other again even
+  where multicast is unreliable (design.md 7, step 8 notes).
+
+**Pairing on a running node (step 8):** the phone pairs through its running node rather than a
+separate process. `SyncNode.pair(address, by)` dials in a pairing mode, windows opened on the
+endpoint are accepted by the node's listener, `pairing=1` is advertised while a code is shown, and
+`onPairingEnded` reports the outcome. The pairing connection then carries on as the first session.
+
 **Heartbeat (1.2, `ping`/`pong`):**
 - A Ping after 30 s without sending.
 - 90 s without receiving anything closes the session (3 missed), and the node reconnects with

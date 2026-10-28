@@ -97,7 +97,7 @@ a one-line justification in their PR.
 | Desktop mDNS | `org.jmdns:jmdns` 3.6.4 | Released 2026-10-10, active. https://github.com/jmdns/jmdns |
 | Android mDNS | Platform `NsdManager` | https://developer.android.com/develop/connectivity/wifi/use-nsd |
 | QR generate | `com.google.zxing:core` 3.5.4 | Pure Java, both platforms |
-| QR scan (Android) | CameraX + zxing core analyzer | zxing-android-embedded is stale (2021); ML Kit needs Google Play Services, not allowed on F-Droid. CameraX version **[verify at step 8]** |
+| QR scan (Android) | CameraX 1.6.2 + zxing core analyzer | zxing-android-embedded is stale (2021); ML Kit needs Google Play Services, not allowed on F-Droid. CameraX 1.6.2 is the newest stable on Google Maven (checked at step 8) |
 | Paging | AndroidX Paging 3.5.3 + `app.cash.sqldelight:androidx-paging3-extensions` 2.4.1 | cashapp multiplatform-paging has had no release since 2024-02 |
 | Sync wire format (step 5) | `kotlinx-serialization-cbor` 1.12.0 | Self-describing, so higher minor versions are read by skipping unknown fields; native byte strings; first-party and multiplatform. Protobuf would need field numbers on everything and is equally experimental (docs/sync/protocol.md section 2) |
 | Property tests (step 5, test only) | `io.kotest:kotest-property` 6.2.6 | Multiplatform, works inside plain kotlin.test without the kotest engine, shrinks failures. jqwik is JUnit 5 and JVM-only |
@@ -337,7 +337,8 @@ Also:
   The CI check fails if the merged `vault` manifest contains `INTERNET` or `ACCESS_LOCAL_NETWORK`.
 - **Wi-Fi allowlist:** reading the SSID needs a location-class permission on Android 10+
   (`ACCESS_FINE_LOCATION`, plus `NEARBY_WIFI_DEVICES` on 13+), and possibly location services
-  switched on **[verify exact rule at step 8]**. More private default: the allowlist is off, and we
+  switched on (step 8: with `ACCESS_FINE_LOCATION` and location on, the SSID is visible on the
+  Android 16 device; location off was not tried, see the step 8 notes in section 7). More private default: the allowlist is off, and we
   request the permission only when the user turns it on, with the explanation in-UI. Without it,
   sync simply runs on whatever LAN can reach a paired peer, and the encrypted handshake fails
   against anything that is not one.
@@ -469,6 +470,64 @@ The brief's steps 0-9 stay as given. Adjustments:
   (`clipvault-agent pair`, pairing.md section 5); there is no Compose desktop window in v1.
   - **Required:** a settings change that affects sync (sensitive opt-ins, `syncEnabledAt`,
     exclusions) closes and reconnects live sessions, so peers see the new Hello at once.
+- **Step 8 notes (2026-10-28):**
+  - **Where the code is:** screens and ViewModels in `:ui` (`ui/sync/`), behind the `SyncController`
+    and `PermissionGate` interfaces, so `:ui` holds no sync code. `:sync` implements them
+    (`SyncRuntime`) and holds the Android glue. The camera scanner and the permission gate live in
+    `androidApp/src/sync`. The vault flavor passes no `SyncUi`; `verifyVaultDebugOffline` still passes.
+  - **One thread:** in the sync flavor the store's dispatcher is `SyncDispatcher.db`
+    (`Dispatchers.IO.limitedParallelism(1)`), and the node runs on the same one. App writes go
+    through `SyncedClipRepository` -> `SyncNode.write`, so they never interleave with applies and
+    reach live peers at once. The vault flavor keeps `Dispatchers.IO`.
+  - **Device id:** the app's repository reads `deviceId(db)` per write. Before step 8 it read it
+    once at start, so clips written after enabling sync would have kept the pre-sync id (5.3.1).
+  - **Foreground service:** `SyncService`, type `specialUse`, with the justification in the
+    `PROPERTY_SPECIAL_USE_FGS_SUBTYPE` property. Per the docs, Android 15 caps `dataSync` and
+    `mediaProcessing` at 6 h per 24 h and calls `onTimeout`; `specialUse` has no cap, and no
+    timeout was hit on the Android 16 device. `KeepAlive` decides when it runs: sync enabled,
+    network allowed, and the screen on or a clip (local or received) in the last 5 minutes.
+    A screen-off with no recent clip stops it at once (the brief's rule, no extra grace).
+  - **Starting it:** the app starts it when it comes to the foreground and after a capture (both
+    foreground). Android 12+ refuses a start from the background
+    (`ForegroundServiceStartNotAllowedException`); `KeepAlive` then stays "not running" and the
+    runtime queues an expedited catch-up instead. Under instrumentation the device allowed a
+    background start after screen on, so the refusal path is read in the docs, not observed.
+  - **Catch-up:** WorkManager 2.12.0, unique periodic work every 15 min with a `CONNECTED`
+    constraint, plus one expedited run (`RUN_AS_NON_EXPEDITED_WORK_REQUEST` when out of quota)
+    when a start is refused. A run holds the node until every peer is live, plus 3 s for pushes,
+    at most 60 s. Expedited work runs as a foreground service below Android 12; untested there.
+  - **Discovery:** `NsdDiscovery` (NsdManager), random instance name per node, `pairing=1` while a
+    code is shown (the node re-advertises within a tick of the window opening or closing). It holds
+    a Wi-Fi `MulticastLock` while active.
+    - **Bug found on the device:** on Android 14+ the resolve callback was delivered on the executor
+      that was blocked waiting for it, so a service only resolved after the 5 s timeout.
+    - **This LAN:** the desktop (wired) hears the phone's (Wi-Fi) mDNS queries every time
+      (3/3 in a raw listener), but answers from JmDNS or avahi reached the phone in 2 of 13 NSD
+      test runs. Google Cast answers from another device did arrive. Treated as the network's
+      multicast behaviour; nothing in the app changed it (multicast lock, default network checked).
+  - **Unicast after first contact (protocol 1.3):** `Hello.port` says where the sender listens,
+    and the receiver stores `peer host:port` as the peer's last address, which dial rounds already
+    try. Each node reuses its last port (`sync.port`), and `pair` announces the daemon's port. So
+    after QR pairing (which needs no mDNS) both sides reconnect without multicast.
+  - **Bug found on the device:** the start-up bind and the first NetworkCallback both bound a
+    listener (`rebindIfChanged` suspends in `listen`); serialised with a mutex.
+  - **Network changes:** a `NetworkCallback` on Wi-Fi/Ethernet (without requiring internet) calls
+    `SyncNode.networkChanged()`: rebind now, drop connections if the addresses changed, dial every
+    peer without waiting out its backoff. Cellular addresses are never listened on.
+  - **Permissions:**
+    - `ACCESS_LOCAL_NETWORK` exists from Android 17 (API 37). The Android 16 device has no such
+      permission (0 matches in `pm list permissions`), so the gate treats it as granted below 37;
+      the explanation and denial path is covered by the ViewModel tests only.
+    - Wi-Fi allowlist: `ACCESS_FINE_LOCATION` (asked together with coarse, as Android 12+ requires;
+      approximate location hides the SSID). Read with `WifiManager.connectionInfo` (deprecated, but
+      the replacement needs a callback registered with `FLAG_INCLUDE_LOCATION_INFO`). Verified on the
+      device with location services on (`theAllowlistSeesTheSsidWithFineLocation`, run alone with
+      `-e ssid 1`); with location off it was not tried, to leave the phone's settings alone.
+    - Camera for scanning; all three asked only when the feature is used, after an in-UI explanation.
+  - **Test suites:** device tests that need no clipboard are in the package
+    `cz.tadeasf.clipvault.synctests` (`-e package cz.tadeasf.clipvault.synctests`); capture tests
+    run with `-e notPackage cz.tadeasf.clipvault.synctests`. The two desktop tests in it need a
+    throwaway agent showing a code and `-e desktopCode NNNNNN`, and are skipped without it.
 - **Step 9:** hardening. Desktop packaging already landed in step 4. Also our own GNOME Shell
   extension (about 100 lines of GJS) that exposes the focused window's app ID over D-Bus, so
   per-app exclusions work on GNOME Wayland (decided 2026-10-28; until then they are unavailable

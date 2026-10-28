@@ -39,6 +39,8 @@ class PeerStore(private val db: SyncDatabase, private val c: Crypto, internal va
 
     fun seen(publicKey: ByteArray) = q.seenPeer(now(), publicKey)
 
+    fun rename(publicKey: ByteArray, name: String) = q.renamePeer(name, now(), publicKey)
+
     fun reachedAt(publicKey: ByteArray, address: String) = q.setAddress(address, publicKey)
 
     /** Local and immediate. Without a live session to send Revoke on, it waits 30 days for the peer to call. */

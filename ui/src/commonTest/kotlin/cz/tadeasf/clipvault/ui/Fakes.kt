@@ -12,9 +12,20 @@ import cz.tadeasf.clipvault.model.InsertResult
 import cz.tadeasf.clipvault.model.RetentionPolicy
 import cz.tadeasf.clipvault.settings.Settings
 import cz.tadeasf.clipvault.settings.SettingsRepository
+import cz.tadeasf.clipvault.detect.SensitiveCategory
+import cz.tadeasf.clipvault.ui.sync.PairMethod
+import cz.tadeasf.clipvault.ui.sync.PairingProgress
+import cz.tadeasf.clipvault.ui.sync.PermissionGate
+import cz.tadeasf.clipvault.ui.sync.SyncController
+import cz.tadeasf.clipvault.ui.sync.SyncPermission
+import cz.tadeasf.clipvault.ui.sync.SyncSnapshot
+import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.map
 
 fun clip(id: String, content: String = id, sensitive: Boolean = false, pinned: Boolean = false) = Clip(
@@ -93,3 +104,55 @@ class FakePlatform(accessibilityOn: Boolean? = false) : Platform {
 
 /** Exposes the state as a value so tests don't need casts everywhere. */
 inline fun <reified T> StateFlow<*>.valueAs(): T = value as T
+
+class FakeSyncController(initial: SyncSnapshot = SyncSnapshot()) : SyncController {
+    override val state = MutableStateFlow(initial)
+    val pairings = mutableListOf<PairMethod>()
+
+    /** What the next pairing emits; the flow ends after Paired or Failed, like the real one. */
+    val progress = Channel<PairingProgress>(Channel.UNLIMITED)
+    var pairingCancelled = false
+
+    override suspend fun setEnabled(enabled: Boolean) = state.update { it.copy(enabled = enabled) }
+    override suspend fun setDeviceName(name: String) = state.update { it.copy(deviceName = name) }
+    override suspend fun setSensitiveOptIn(category: SensitiveCategory, optIn: Boolean) = state.update {
+        it.copy(sensitiveOptIn = if (optIn) it.sensitiveOptIn + category else it.sensitiveOptIn - category)
+    }
+    override suspend fun setWifiAllowlist(enabled: Boolean) = state.update { it.copy(wifiAllowlist = enabled) }
+    override suspend fun setSsidAllowed(ssid: String, allowed: Boolean) = state.update {
+        it.copy(allowedSsids = if (allowed) it.allowedSsids + ssid else it.allowedSsids - ssid)
+    }
+    override suspend fun unpair(id: String) = state.update { s -> s.copy(peers = s.peers.filterNot { it.id == id }) }
+
+    override fun pair(method: PairMethod): Flow<PairingProgress> = flow {
+        pairings += method
+        try {
+            for (p in progress) {
+                emit(p)
+                if (p is PairingProgress.Paired || p is PairingProgress.Failed) break
+            }
+        } catch (e: CancellationException) {
+            pairingCancelled = true
+            throw e
+        }
+    }
+}
+
+class FakePermissionGate(vararg granted: SyncPermission) : PermissionGate {
+    val granted = granted.toMutableSet()
+    val requested = mutableListOf<SyncPermission>()
+    var grantOnRequest = false
+    var settingsOpened = 0
+
+    override fun isGranted(permission: SyncPermission) = permission in granted
+
+    override suspend fun request(permission: SyncPermission): Boolean {
+        requested += permission
+        if (grantOnRequest) granted += permission
+        return grantOnRequest
+    }
+
+    override fun openAppSettings() {
+        settingsOpened++
+    }
+}
