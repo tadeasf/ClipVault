@@ -54,7 +54,7 @@ class SyncSession internal constructor(
     private val optIns = node.config.sensitiveOptIn
 
     internal fun start() = node.config.let {
-        send(Hello(it.deviceId, optIns.names(), minOf(it.maxPayloadBytes, HARD_MAX_PAYLOAD), it.syncEnabledAt.takeIf { at -> at > 0 }))
+        send(Hello(it.deviceId, optIns.names(), minOf(it.maxPayloadBytes, HARD_MAX_PAYLOAD), it.syncEnabledAt.takeIf { at -> at > 0 }, it.name, it.listenPort))
     }
 
     /** One decoded message from the peer; envelope numbering and versions are the transport's job. */

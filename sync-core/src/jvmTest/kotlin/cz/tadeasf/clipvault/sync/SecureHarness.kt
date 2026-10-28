@@ -23,7 +23,7 @@ class SecureNet(vararg ids: String) : AutoCloseable {
 
     /** What each device's user answers to the fingerprint words; records what was shown. */
     val answers = ids.associateWith { true }.toMutableMap()
-    val shownWords = mutableMapOf<String, List<String>>()
+    val shownWords = java.util.concurrent.ConcurrentHashMap<String, List<String>>() // live nodes write from their own threads
 
     inner class Side(val device: Device) {
         val peers = PeerStore(device.syncDb, c) { clock }

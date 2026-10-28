@@ -154,6 +154,25 @@ class SyncNodeTest {
     }
 
     @Test
+    fun aRenameReconnectsAndThePeerStoresTheNameFromHello() = runBlocking<Unit> {
+        LiveNet("A", "B").use { net ->
+            net.pair("A", "B")
+            net.sees("B", "A")
+            net.start("A")
+            net.start("B")
+            eventually(message = { "never live" }) { net.status("B", "A").state == PeerState.LIVE }
+            val before = net.nodes.getValue("B").connectionsOpened
+            val config = net.secure["B"].device.node.config.copy(name = "Renamed‮ B")
+            net.nodes.getValue("B").reconfigure(config)
+            eventually(message = { "A still calls B ${net.secure["A"].peers.peers().single().name}" }) {
+                net.secure["A"].peers.peers().single().name == "Renamed B"
+            }
+            eventually(message = { "no reconnect" }) { net.nodes.getValue("B").connectionsOpened > before && net.status("B", "A").state == PeerState.LIVE }
+            println("rename: Bye + reconnect, A stores the sanitized name from Hello")
+        }
+    }
+
+    @Test
     fun sixteenCoroutinesHammerOneNodeWithoutInterleavingAndConverge() = runBlocking<Unit> {
         LiveNet("A", "B").use { net ->
             net.pair("A", "B")

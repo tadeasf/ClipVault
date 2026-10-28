@@ -6,6 +6,8 @@ import cz.tadeasf.clipvault.sync.crypto.Crypto
 import cz.tadeasf.clipvault.sync.crypto.CryptoFailure
 import cz.tadeasf.clipvault.sync.crypto.Jpake
 import cz.tadeasf.clipvault.sync.crypto.lp
+import cz.tadeasf.clipvault.sync.node.addressOf
+import cz.tadeasf.clipvault.sync.node.hostOf
 import cz.tadeasf.clipvault.sync.pairing.PairingWindows
 import cz.tadeasf.clipvault.sync.pairing.PeerStore
 import cz.tadeasf.clipvault.sync.pairing.deviceIdOf
@@ -13,6 +15,7 @@ import cz.tadeasf.clipvault.sync.pairing.fingerprintWords
 import cz.tadeasf.clipvault.sync.pairing.sanitizeName
 import cz.tadeasf.clipvault.sync.wire.Bye
 import cz.tadeasf.clipvault.sync.wire.Decoded
+import cz.tadeasf.clipvault.sync.wire.Hello
 import cz.tadeasf.clipvault.sync.wire.Identity
 import cz.tadeasf.clipvault.sync.wire.Message
 import cz.tadeasf.clipvault.sync.wire.PairConfirm
@@ -33,8 +36,8 @@ class SecureEndpoint(
     val windows: PairingWindows,
     val guard: HandshakeGuard,
     val now: () -> Long,
-    /** This device's name, sent in the identity exchange. */
-    val name: String,
+    /** This device's name, sent in the identity exchange; the phone renames it in place (step 8). */
+    var name: String,
     /** Shows the six words; the UI (or a test) answers. */
     val confirm: (ConfirmRequest) -> Unit,
 )
@@ -98,6 +101,12 @@ class SecureConnection private constructor(
 
     /** True for the side that dialled; the simultaneous-connect rule needs it. */
     val initiatedHere: Boolean get() = initiating
+
+    /** The peer's host: [remote] is `host:port` when dialled, the bare host when accepted. */
+    private val peerHost: String get() = if (initiating) hostOf(remote) else remote
+
+    /** Whether this connection runs (or ran) in a pairing mode; known from Init on, or at once when dialled to pair. */
+    val pairing: Boolean get() = mode?.pairing == true
 
     // Observability and heartbeat (sealed frames only).
     var framesIn = 0L
@@ -322,7 +331,11 @@ class SecureConnection private constructor(
             if (message is Pong) return
             val session = syncSession!!
             session.receive(message)
-            if (session.closed) close(session.closeReason ?: "sync session ended")
+            if (session.closed) return close(session.closeReason ?: "sync session ended")
+            // Protocol 1.3: a paired peer's current name; pairing keeps the one from Identity.
+            if (message is Hello && mode == HandshakeMode.SESSION) message.name?.let { e.peers.rename(peerKey!!, sanitizeName(it)) }
+            // 1.3: where the peer listens, so reconnects work by unicast where mDNS doesn't get through.
+            if (message is Hello) message.port?.takeIf { it in 1..65535 }?.let { e.peers.reachedAt(peerKey!!, addressOf(peerHost, it)) }
             return
         }
         // PAIRING: only identity, pair_confirm and bye until both sides confirmed (handshake.md 3.5).
