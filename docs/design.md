@@ -438,11 +438,15 @@ The brief's steps 0-9 stay as given. Adjustments:
     (`sync-core/consumer-rules.pro`). The test-only `minifiedCheck` build type keeps the sync code
     reachable (`androidApp/r8-check.pro`), and `SyncCryptoOnDeviceTest` passes in it on the device.
     The other keeps in that file only exist so the older instrumented tests can reach app internals.
-  - **mDNS and the desktop firewall:** Fedora's `FedoraWorkstation` firewalld zone opens TCP and
-    UDP 1025-65535 but not the `mdns` service (UDP 5353).
-    - `pair --join` discovery therefore finds nothing on such a machine; `--join --addr` works.
-    - Step 7 has to handle the same problem for discovery: detect it, say so in `status`, and tell
-      the user how to allow mDNS. The app never changes the firewall itself (section 12).
+  - **mDNS discovery:** `pair --join` (mDNS) and `pair --join --addr` both work end to end, two
+    agent instances on one machine with mDNS allowed in the firewall.
+    - **Browse timing:** a fresh JmDNS instance's first `list()` often returns before anything is
+      resolved. Plain JmDNS on this machine found nothing in 3 s, then found the service on the next
+      call. `--join` therefore browses in 2 s rounds for up to 10 s.
+    - **Firewall:** Fedora's `FedoraWorkstation` firewalld zone opens TCP and UDP 1025-65535 but not
+      the `mdns` service (UDP 5353); the user allowed it. Not tested: discovery with mDNS blocked
+      after the timing fix. Step 7 should detect a blocked mDNS for discovery, say so in `status`,
+      and point to `--addr`. The app never changes the firewall itself (section 12).
 - **Step 7:** transport and discovery, plus the agent's sync loop.
   - **Required:** each `SyncNode` runs on one single-threaded dispatcher. A
     convergence-under-concurrency test (local writes, received events and several live sessions

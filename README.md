@@ -52,8 +52,8 @@ clipvault-agent status
   `~/.local/share/clipvault/history.db` aside and restart the service to start a new, empty
   history.
 - **Pairing two desktops:** `clipvault-agent pair --code` on one, `pair --join` on the other. If
-  `--join` finds nothing, the firewall is probably dropping mDNS (Fedora Workstation's default zone
-  does). Use `pair --join --addr HOST:PORT` (printed by `pair --code`), or allow mDNS yourself.
+  `--join` finds nothing, check that the firewall allows mDNS (UDP 5353; Fedora Workstation's
+  default zone doesn't), or use `pair --join --addr HOST:PORT` as printed by `pair --code`.
 - **GNOME on Wayland:** CopyQ cannot tell which app a clip came from, so per-app exclusions are
   unavailable on GNOME for now. A small ClipVault GNOME extension that reports the focused app is
   planned for step 9. Exclusions work where CopyQ reports a window title (X11, some compositors).

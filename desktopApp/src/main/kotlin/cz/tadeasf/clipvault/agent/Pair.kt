@@ -150,8 +150,17 @@ class PairCommand(
         val addresses = listen?.let(::listOf) ?: siteLocalAddresses()
         out.println("Looking for devices showing a pairing code...")
         val found = addresses.flatMap { address ->
-            JmDNS.create(address, "clipvault-join").use { mdns -> mdns.list(SERVICE_TYPE, 3000).toList() }
-        }.filter { it.getPropertyString("pairing") == "1" }
+            JmDNS.create(address, "clipvault-join").use { mdns ->
+                // The first list() often returns before anything is resolved (seen on this machine with plain
+                // JmDNS: 0 found after 3 s, found on the next call). Rounds keep JmDNS's cache; stop at the first hit.
+                var round = emptyList<ServiceInfo>()
+                for (attempt in 1..BROWSE_ROUNDS) {
+                    round = mdns.list(SERVICE_TYPE, BROWSE_ROUND_MILLIS).filter { it.getPropertyString("pairing") == "1" }
+                    if (round.isNotEmpty()) break
+                }
+                round
+            }
+        }
             .mapNotNull { info -> info.inetAddresses.firstOrNull()?.let { InetSocketAddress(it, info.port) } }
             .distinct()
         if (found.isEmpty()) return null
@@ -249,6 +258,8 @@ class PairCommand(
 
     companion object {
         const val SERVICE_TYPE = "_clipvault._tcp.local."
+        private const val BROWSE_ROUNDS = 5
+        private const val BROWSE_ROUND_MILLIS = 2000L
         private const val QUIET_MILLIS = 2000L
 
         fun qr(text: String): BitMatrix = QRCodeWriter().encode(

@@ -13,3 +13,4 @@
 -keep class androidx.compose.** { *; }
 -keep class androidx.collection.** { *; }
 -keep class com.google.common.util.concurrent.ListenableFuture { *; }
+-keep class androidx.lifecycle.** { *; }
