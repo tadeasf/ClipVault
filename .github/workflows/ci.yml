@@ -20,11 +20,23 @@ jobs:
       - name: Verify vault flavor is offline
         run: ./gradlew :androidApp:verifyVaultDebugOffline :androidApp:verifyVaultReleaseOffline
 
+      - name: Install a throwaway keyring for the Secret Service test
+        run: sudo apt-get install -y --no-install-recommends gnome-keyring dbus
+
       # Coverage gate on the jvm variant (common + jvm code). Android-only classes are covered by
       # instrumented tests (connectedAndroidDeviceTest), which Kover cannot measure.
-      # The Secret Service test skips itself on runners without a keyring.
+      # Tests run inside a private D-Bus session with an unlocked, empty GNOME Keyring, so the
+      # dbus-java Secret Service client is exercised; if the keyring fails to start, that test skips.
       - name: Tests and coverage gate
-        run: ./gradlew :shared:allTests :sync-core:allTests :shared:koverVerifyJvm :shared:koverHtmlReport
+        run: |
+          dbus-run-session -- bash -c '
+            echo -n ci | gnome-keyring-daemon --unlock --components=secrets > /dev/null
+            ./gradlew :shared:allTests :sync-core:allTests :shared:koverVerifyJvm :shared:koverHtmlReport
+          '
+
+      - name: Report whether the Secret Service test ran
+        if: always()
+        run: grep -c '<skipped' shared/build/test-results/jvmTest/TEST-cz.tadeasf.clipvault.security.DesktopKeyTest.xml || true
 
       - name: Upload coverage report
         if: always()

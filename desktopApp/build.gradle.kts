@@ -12,6 +12,7 @@ dependencies {
 
     implementation(compose.desktop.currentOs)
     implementation(libs.kotlinx.coroutinesSwing)
+    runtimeOnly(libs.slf4j.nop) // dbus-java logs through slf4j; without a provider it prints a warning on every start
 
     implementation(libs.compose.uiToolingPreview)
 }

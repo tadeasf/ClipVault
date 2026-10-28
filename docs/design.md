@@ -86,7 +86,7 @@ a one-line justification in their PR.
 | Android DB encryption | `net.zetetic:sqlcipher-android` 4.20.0 + `androidx.sqlite:sqlite` | Successor to android-database-sqlcipher, actively maintained, minSdk 23. Plug `SupportOpenHelperFactory(keyBytes)` into SQLDelight's `AndroidSqliteDriver`. https://github.com/sqlcipher/sqlcipher-android |
 | Desktop DB encryption | `io.github.willena:sqlite-jdbc` 3.53.4.0 (sqlite-jdbc-crypt), replacing `org.xerial:sqlite-jdbc` under `app.cash.sqldelight:sqlite-driver` | Same `org.sqlite` package, so it drops in under `JdbcSqliteDriver`. Bundles Linux x86_64 + aarch64 natives. Configure with `SQLiteMCSqlCipherConfig`. https://github.com/Willena/sqlite-jdbc-crypt |
 | Android key storage | Platform Android Keystore: AES-GCM key in AndroidKeyStore wraps a random 32-byte DB key | `androidx.security:security-crypto` is deprecated in favour of the platform API (https://developer.android.com/jetpack/androidx/releases/security). https://developer.android.com/privacy-and-security/keystore |
-| Linux keyring | **Changed at step 1:** libsecret's `secret-tool` CLI (no JVM dependency), behind a `Keyring` interface | swiesend only publishes `3.0.0-alpha`, while its README already documents an unpublished `3.0.0-beta` API, so it is still moving. secret-tool is stable libsecret: it handles unlock prompts, takes the secret on stdin (never argv), and works with GNOME Keyring, KWallet (5.97+) and KeePassXC. It is a runtime binary: Fedora's `libsecret` package ships it; Debian's `libsecret-tools` does not come by default, so the `.deb` must depend on it. Without it, the passphrase fallback is used. Swapping to dbus-java is one class |
+| Linux keyring | **Step 2:** `com.github.hypfvieh:dbus-java-core` + `dbus-java-transport-native-unixsocket` 5.2.2, talking to `org.freedesktop.secrets` directly (`SecretServiceKeyring`, 138 lines) | One dependency that the tray (StatusNotifierItem) and the GlobalShortcuts portal also need. Pure-Java unix-socket transport (JDK 16+), no JNI. Uses a "plain" session (local session bus only, which the spec allows). Items go into the `default` collection; an unlock prompt, if one is shown, is awaited (120 s). No default collection, or no bus, means `detect()` returns null and the Argon2id file fallback is used. Step 1 used libsecret's `secret-tool` CLI, now removed. https://github.com/hypfvieh/dbus-java |
 | Keyring-less fallback | Passphrase-encrypted key file: Argon2id via BouncyCastle `Argon2BytesGenerator` (Tink has no Argon2), 64 MiB / t=3 / p=1 (RFC 9106 second recommended option), sealing with AES-256-GCM. The UI warns that this is the weaker mode | `org.bouncycastle:bcprov-jdk18on` 1.86, which step 6 needs for EC J-PAKE anyway |
 | Crypto primitives | Google Tink `tink-android` / `tink` 1.24.0 | Pure Java (no native libs, good for F-Droid reproducibility), Google-maintained, exposes X25519, HKDF, XChaCha20-Poly1305, Ed25519. The libsodium KMP binding (ionspin 0.9.5) labels itself "Experimental" and has no RFC 5869 HKDF. https://github.com/tink-crypto/tink-java |
 | PAKE (6-digit code) | BouncyCastle `bcprov-jdk18on` 1.86, EC J-PAKE (`org.bouncycastle.crypto.agreement.ecjpake`, RFC 8236) | No maintained SPAKE2/CPace/OPAQUE on Maven Central. EC J-PAKE is the best maintained real PAKE we found. Pure Java. https://github.com/bcgit/bc-java |
@@ -123,10 +123,29 @@ payload, sensitive, pinned, deleted, lamportClock}`. Two refinements:
   `seq`. A peer remembers "last seq I got from you" and asks for `seq > N`. Lamport stays for LWW
   ordering only. `docs/sync/protocol.md` will include this example.
 
-Step 1 implementation notes:
-- **Event counter:** `MetaEvent.seq` is an `AUTOINCREMENT` primary key, so it is never reused.
-  Clip rows have no `seq` yet. Step 5 has to give clip creations and metadata events one shared
-  counter before catch-up can use it.
+Implementation notes (steps 1-2):
+- **Event counter (step 2):** clip writes and MetaEvents share one counter, the single-row
+  `SeqCounter` table.
+  - **Allocation:** `nextSeq()` runs `UPDATE SeqCounter SET value = value + 1` and then reads the
+    value, inside the caller's transaction. The UPDATE takes SQLite's write lock before the read,
+    so two writers cannot get the same seq.
+  - **Re-copy:** a re-copied clip (dedupe bump) gets a new seq, so catch-up delivers the bump.
+  - **Catch-up (step 5):** `Clip.seq > N UNION MetaEvent.seq > N ORDER BY seq`.
+  - **Migration:** `1.sqm` takes step-1 databases to this schema. Existing clips get seqs after
+    the highest existing MetaEvent seq, so the two never collide. `MigrationTest` runs it on jvm
+    and on device.
+- **Sensitive clips (step 2):**
+  - `ClipIngest` never stores clips from a sensitive source (`SkipReason.SENSITIVE_SOURCE`). That
+    means the copying app set `EXTRA_IS_SENSITIVE`, or it is a known password manager by package
+    or window title (`KnownSensitiveSources.matches`). The system clipboard still holds the value
+    for pasting; ClipVault just doesn't record it.
+  - Everything `SensitiveDetector` flags is stored with `sensitive = 1`: hidden from lists by
+    default and deleted outright by the TTL sweep (default 2 min) in `applyRetention`.
+  - **Pinned sensitive clips:** pinning wins, because it is an explicit user act. They are exempt
+    from the sweep, but stay hidden by default in the list. The pin UI shows a one-line warning.
+  - **Categories:** stored in `Clip.categories` as comma-separated `SensitiveCategory` names,
+    empty when the clip is not sensitive (migration `2.sqm`, step 2). Rows flagged before that
+    column existed are `UNKNOWN`. Step 5 uses this for per-category sync opt-in.
 - **Delete:** deleting a clip tombstones the row (`deleted = 1`, kept for sync) and erases
   `content` and `contentHash`, which also drops it from the FTS index.
 - **Retention:** retention by count or age is local policy. It removes rows outright, never
@@ -314,13 +333,27 @@ Also:
     working emulator here (`docs/dev/emulator.md`). We never copy DB files between devices.
 - **FTS5 (resolved step 1):** available on both platforms.
   - **JVM:** sqlite-jdbc-crypt passes the FTS5 tests.
-  - **Android:** sqlcipher-android 4.20.0's `libsqlcipher.so` lists `ENABLE_FTS5` in its compile
-    options; the instrumented run is still pending.
-  - **Schema:** `ClipFts` is a plain FTS5 table keyed by `Clip.rowid`, maintained by triggers.
-    `UPDATE ClipFts SET content = new.content` inside a trigger overflows SQLDelight 2.4.1's
-    resolver, so the update trigger is delete + insert.
-  - **Query:** user input is quoted per token and prefix-matched (`ftsQuery`), so FTS operators are
-    literal. Limitation: prefix only, no infix ("hub" does not find "github").
+  - **Android:** sqlcipher-android 4.20.0 (SQLite 3.54.1) lists `ENABLE_FTS5` in its compile
+    options. Verified on device (SM-S916B, Android 16).
+  - **Schema (step 2):** two FTS5 tables keyed by `Clip.rowid` and maintained by triggers.
+    `ClipFts` uses `tokenize = 'trigram remove_diacritics 1'` for substring search, which needs
+    SQLite 3.34+ for trigram and 3.45+ for `remove_diacritics`. `ClipFtsPrefix` uses the default
+    unicode61 tokenizer for word-prefix search.
+  - **Trigger workaround:** `UPDATE ClipFts SET content = new.content` inside a trigger overflows
+    SQLDelight 2.4.1's resolver, so the update triggers are delete + insert.
+  - **Query (step 2):** user input is quoted per token, so FTS operators are literal (`ftsQuery`).
+    When every token has at least 3 characters the trigram index is used ("hub" finds "github");
+    otherwise the prefix index, because trigram cannot match shorter tokens. Both indexes fold
+    diacritics ("kod" finds "kód"). Verified on jvm and on device.
+  - **Cost:** the index is stored twice (trigram + prefix). Clips are mostly short text, so this
+    was accepted.
+- **Regex portability (found on device, step 2):** Android's `java.util.regex` is ICU-backed and
+  rejects the `(?U)` (UNICODE_CHARACTER_CLASS) flag, which crashed `SensitiveDetector` at class
+  init. On the JVM, however, `\b` is ASCII-only without `(?U)`, so `\bověřovací\b` never matches
+  there. Shared regexes therefore use explicit `(?<![\p{L}\p{N}])` / `(?![\p{L}\p{N}])` word edges
+  and lowercase the text instead of relying on case-insensitive flags for non-ASCII. Any regex
+  change must be tested on a device too, which `commonTest` running in `androidDeviceTest`
+  provides.
 - **Paging on jvm (resolved step 1):** AndroidX publishes the JVM variant of Paging 3.5.3 as
   `paging-common-desktop`, not `-jvm`. The `paging-common-jvm` artifact stops at 3.4.0-alpha02,
   which is a red herring. `QueryPagingSource` works on jvm in tests.
@@ -382,3 +415,46 @@ Smaller defaults, which hold unless you object:
 - The minSdk is 26.
 - The mDNS instance name rotates on every app start.
 - The Wi-Fi allowlist is off by default.
+
+## 9. Local detection and transformations (step 2)
+
+Everything here is pure `commonMain` code, run on every insert. Each rule leans towards missing a
+secret over flagging ordinary text.
+
+**Sensitive categories (`SensitiveDetector.classify(text, hints)`):**
+- **PASSWORD:** `isSensitiveFlag`, a package in `KnownSensitiveSources.packages`, or a window title
+  containing a name in `KnownSensitiveSources.windowTitles`. The detector is content-blind here;
+  the source signal alone decides.
+- **CARD_NUMBER:** 13-19 digits, contiguous or in 4-digit (or Amex 4-6-5) groups. Requires a
+  card-network prefix and a valid Luhn checksum, and the number must not touch `/` or `-` digits,
+  which rules out bank accounts such as `123456-1234567890/0300`.
+- **IBAN:** the ISO 13616 shape with a valid mod-97 checksum.
+- **OTP:**
+  - A clip that is only 6 digits (or `123 456`).
+  - In a text of up to 300 characters, a 4-8 digit number (not a year 1900-2099) next to a
+    keyword: code, kód, OTP, PIN, ověřovací, jednorázový and similar.
+  - Bare 4, 5, 7 or 8 digits are deliberately not OTP. Missing a bare 4-digit PIN is accepted;
+    hiding a Prague postcode like `11000` would be the worse failure.
+- **API_KEY:**
+  - OpenAI/Anthropic `sk-`, Stripe live keys, GitHub `gh?_` and `github_pat_`.
+  - AWS `AKIA`/`ASIA`, Slack `xox?-`, Google `AIza`, JWT (`eyJ...eyJ...sig`).
+- **PRIVATE_KEY:** a `-----BEGIN ... PRIVATE KEY-----` block.
+- **CREDENTIALS_PAIR:**
+  - `user:secret` on a single line. URL schemes, ports and paths are excluded.
+  - An email line followed by one secret-looking line.
+  - "Secret-looking" means no spaces, a letter, and a digit or a symbol other than `-_.`.
+- **SSN_LIKE_ID:** Czech/Slovak rodné číslo `YYMMDD/XXXX`, with a valid date (+50/+20/+70 month
+  offsets) and a mod-11 check. The bare 10-digit form counts only next to a "rodné číslo"/"RČ"
+  label.
+
+**Content type (`detectContentType`):** JSON (an object or array that parses) -> URL (the whole
+clip) -> EMAIL -> PHONE (E.164 or Czech 9-digit with optional +420/00420) -> CODE (at least 3
+lines, at least 40% of them code-like) -> PLAIN.
+
+**Transformations (`Transformation`, each `(String) -> Result<String>`):**
+- **Case:** trim, upper, lower, title and sentence case.
+- **Strip formatting:** drops zero-width characters, turns NBSP into spaces, collapses runs of
+  spaces and blank lines.
+- **URL cleanup:** drops `utm_*`, `fbclid`, `gclid`, `igshid` and `si` from every URL in the text.
+- **JSON:** pretty-print and minify. Invalid JSON fails soft, as `Result.failure`.
+- **Base64:** encode and decode. Decode only succeeds when the result is printable UTF-8.

@@ -37,6 +37,7 @@ kotlin {
             api(libs.androidx.paging.common)
             implementation(libs.sqldelight.paging)
             implementation(libs.kotlinx.coroutinesCore)
+            implementation(libs.kotlinx.serializationJson)
         }
         androidMain.dependencies {
             implementation(libs.sqldelight.androidDriver)
@@ -51,6 +52,8 @@ kotlin {
             }
             implementation(libs.sqlite.jdbc.crypt)
             implementation(libs.bouncycastle.prov)
+            implementation(libs.dbus.java.core)
+            implementation(libs.dbus.java.transport)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)

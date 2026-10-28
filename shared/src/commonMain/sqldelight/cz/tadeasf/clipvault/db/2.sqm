@@ -1,0 +1,6 @@
+-- v2 (step 2) -> v3: which sensitive categories a clip matched. Rows flagged before this column
+-- existed are backfilled as UNKNOWN.
+
+ALTER TABLE Clip ADD COLUMN categories TEXT NOT NULL DEFAULT '';
+
+UPDATE Clip SET categories = 'UNKNOWN' WHERE sensitive = 1;

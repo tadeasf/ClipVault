@@ -8,15 +8,17 @@ class FtsQueryTest {
     private val cases = listOf(
         "" to null,
         "   " to null,
-        "hello" to "\"hello\"*",
-        "  two   words " to "\"two\"* \"words\"*",
-        "a OR b" to "\"a\"* \"OR\"* \"b\"*",
-        "say \"hi\"" to "\"say\"* \"\"\"hi\"\"\"*",
-        "col:value NEAR(x)" to "\"col:value\"* \"NEAR(x)\"*",
+        "hello" to FtsQuery.Substring("\"hello\""),
+        "  two   words " to FtsQuery.Substring("\"two\" \"words\""),
+        "kód" to FtsQuery.Substring("\"kód\""),
+        "go" to FtsQuery.Prefix("\"go\"*"),
+        "a OR b" to FtsQuery.Prefix("\"a\"* \"OR\"* \"b\"*"),
+        "say \"hi\"" to FtsQuery.Substring("\"say\" \"\"\"hi\"\"\""),
+        "col:value NEAR(x)" to FtsQuery.Substring("\"col:value\" \"NEAR(x)\""),
     )
 
     @Test
-    fun buildsQuotedPrefixQueries() {
+    fun picksIndexAndQuotesTokens() {
         for ((input, expected) in cases) assertEquals(expected, ftsQuery(input), "input=<$input>")
     }
 }

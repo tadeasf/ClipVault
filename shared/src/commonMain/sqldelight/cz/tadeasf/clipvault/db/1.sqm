@@ -1,0 +1,49 @@
+-- v1 (step 1) -> v2 (step 2): shared seq counter, trigram + prefix FTS, new ContentType names.
+
+CREATE TABLE SeqCounter (
+  id INTEGER NOT NULL PRIMARY KEY CHECK (id = 1),
+  value INTEGER NOT NULL
+);
+
+-- Existing clips get seqs after every existing MetaEvent seq, so the two never collide.
+ALTER TABLE Clip ADD COLUMN seq INTEGER NOT NULL DEFAULT 0;
+
+UPDATE Clip SET seq = (SELECT coalesce(max(seq), 0) FROM MetaEvent)
+  + (SELECT count(*) FROM Clip AS earlier WHERE earlier.rowid <= Clip.rowid);
+
+INSERT INTO SeqCounter(id, value) VALUES (1, max(
+  (SELECT coalesce(max(seq), 0) FROM Clip),
+  (SELECT coalesce(max(seq), 0) FROM MetaEvent)
+));
+
+CREATE UNIQUE INDEX clip_seq ON Clip(seq);
+
+UPDATE Clip SET contentType = 'PLAIN' WHERE contentType IN ('PLAIN_TEXT', 'ADDRESS');
+
+DROP TRIGGER clip_fts_insert;
+DROP TRIGGER clip_fts_delete;
+DROP TRIGGER clip_fts_update;
+DROP TABLE ClipFts;
+
+CREATE VIRTUAL TABLE ClipFts USING fts5(content, tokenize = 'trigram remove_diacritics 1');
+CREATE VIRTUAL TABLE ClipFtsPrefix USING fts5(content);
+
+INSERT INTO ClipFts(rowid, content) SELECT rowid, content FROM Clip;
+INSERT INTO ClipFtsPrefix(rowid, content) SELECT rowid, content FROM Clip;
+
+CREATE TRIGGER clip_fts_insert AFTER INSERT ON Clip BEGIN
+  INSERT INTO ClipFts(rowid, content) VALUES (new.rowid, new.content);
+  INSERT INTO ClipFtsPrefix(rowid, content) VALUES (new.rowid, new.content);
+END;
+
+CREATE TRIGGER clip_fts_delete AFTER DELETE ON Clip BEGIN
+  DELETE FROM ClipFts WHERE rowid = old.rowid;
+  DELETE FROM ClipFtsPrefix WHERE rowid = old.rowid;
+END;
+
+CREATE TRIGGER clip_fts_update AFTER UPDATE OF content ON Clip BEGIN
+  DELETE FROM ClipFts WHERE rowid = old.rowid;
+  INSERT INTO ClipFts(rowid, content) VALUES (new.rowid, new.content);
+  DELETE FROM ClipFtsPrefix WHERE rowid = old.rowid;
+  INSERT INTO ClipFtsPrefix(rowid, content) VALUES (new.rowid, new.content);
+END;

@@ -88,7 +88,7 @@ class DesktopKeyTest {
     /** Talks to the real Secret Service; skipped when none is reachable (CI, headless). */
     @Test
     fun secretServiceRoundTrip() {
-        val detected = SecretToolKeyring.detect(service = "cz.tadeasf.clipvault.test")
+        val detected = SecretServiceKeyring.detect(service = "cz.tadeasf.clipvault.test")
         assumeTrue("no Secret Service on this machine", detected != null)
         val keyring = checkNotNull(detected)
         val account = "test-${UUID.randomUUID()}"

@@ -2,7 +2,7 @@ package cz.tadeasf.clipvault.security
 
 /**
  * Keyring first, passphrase file as fallback. Pass `keyring = null` when no Secret Service is
- * available (see [SecretToolKeyring.detect]). An existing key file always wins, so a keyring that
+ * available (see [SecretServiceKeyring.detect]). An existing key file always wins, so a keyring that
  * appears later never shadows the key the database was created with.
  */
 class DesktopDbKeyProvider(

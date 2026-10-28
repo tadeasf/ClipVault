@@ -1,7 +1,8 @@
 import cz.tadeasf.clipvault.model.MetaField;
 import kotlin.Boolean;
 
--- Append-only metadata log (design 5.1). seq is the local storage counter used for catch-up.
+-- Append-only metadata log (design 5.1). seq comes from SeqCounter, shared with Clip; AUTOINCREMENT
+-- stays only because changing it would need a table rebuild.
 CREATE TABLE MetaEvent (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
   clipId TEXT NOT NULL,
@@ -14,7 +15,7 @@ CREATE TABLE MetaEvent (
 CREATE INDEX meta_clip ON MetaEvent(clipId);
 
 insert:
-INSERT INTO MetaEvent(clipId, field, value, lamportClock, deviceId) VALUES (?, ?, ?, ?, ?);
+INSERT INTO MetaEvent(seq, clipId, field, value, lamportClock, deviceId) VALUES (?, ?, ?, ?, ?, ?);
 
 forClip:
 SELECT clipId, field, value, lamportClock, deviceId FROM MetaEvent WHERE clipId = ?;
