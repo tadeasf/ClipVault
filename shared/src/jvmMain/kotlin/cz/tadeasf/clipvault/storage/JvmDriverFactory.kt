@@ -16,9 +16,13 @@ class JvmDriverFactory(
     override fun open(key: ByteArray): SqlDriver {
         dbFile.parentFile?.mkdirs()
         // SQLCipher v4 format with a raw key, the same scheme as the Android driver.
-        val properties = SQLiteMCSqlCipherConfig.getV4Defaults().withRawUnsaltedKey(key).build().toProperties()
+        val config = SQLiteMCSqlCipherConfig.getV4Defaults().withRawUnsaltedKey(key).build()
+        config.setBusyTimeout(BUSY_TIMEOUT_MILLIS) // the desktop agent's daemon and a fallback `ingest` may overlap
+        val properties = config.toProperties()
         return JdbcSqliteDriver("jdbc:sqlite:${dbFile.absolutePath}", properties, schema)
     }
 
     fun exists(): Boolean = dbFile.exists()
 }
+
+private const val BUSY_TIMEOUT_MILLIS = 5_000

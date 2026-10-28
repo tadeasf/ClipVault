@@ -47,3 +47,22 @@ jobs:
 
       - name: Build apps
         run: ./gradlew :androidApp:assembleVaultDebug :androidApp:assembleSyncDebug :androidApp:assembleVaultDebugAndroidTest :desktopApp:jar
+
+      - name: Desktop agent tests
+        run: ./gradlew :desktopApp:test
+
+      # .rpm, .deb (with Recommends: copyq) and AppImage of clipvault-agent
+      - name: Package desktop agent
+        run: |
+          sudo apt-get install -y --no-install-recommends fakeroot rpm
+          ./gradlew :desktopApp:packageRpm
+          scripts/package-linux.sh
+
+      - name: Upload desktop packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: clipvault-agent-packages
+          path: |
+            desktopApp/build/compose/binaries/main/rpm/*.rpm
+            desktopApp/build/compose/binaries/main/deb/*.deb
+            desktopApp/build/compose/binaries/main/*.AppImage

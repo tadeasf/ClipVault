@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=ClipVault agent
+Comment=Encrypted clipboard history with CopyQ as the desktop front end
+Exec=clipvault-agent
+Icon=clipvault-agent
+Categories=Utility;
+Terminal=true
+NoDisplay=true
