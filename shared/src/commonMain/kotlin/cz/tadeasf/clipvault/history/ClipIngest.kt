@@ -18,7 +18,7 @@ enum class SkipReason {
      */
     SENSITIVE_SOURCE,
 
-    /** The copying app is on the user's exclusion list (needs the Accessibility path to know the app). */
+    /** The copying app is on the user's exclusion list (needs to know the source: Accessibility / window title). */
     EXCLUDED_SOURCE,
 }
 
@@ -28,13 +28,14 @@ enum class SkipReason {
  */
 class ClipIngest(
     private val repository: ClipRepository,
-    private val excludedPackages: () -> Set<String> = { emptySet() },
+    /** Platform rule for the user's exclusion list: package on Android, window title on desktop. */
+    private val isExcluded: (ClipHints) -> Boolean = { false },
 ) {
 
     suspend fun ingest(text: String, hints: ClipHints = ClipHints()): IngestResult = when {
         text.isBlank() -> IngestResult.Skipped(SkipReason.BLANK)
         KnownSensitiveSources.matches(hints) -> IngestResult.Skipped(SkipReason.SENSITIVE_SOURCE)
-        hints.sourcePackage in excludedPackages() -> IngestResult.Skipped(SkipReason.EXCLUDED_SOURCE)
+        isExcluded(hints) -> IngestResult.Skipped(SkipReason.EXCLUDED_SOURCE)
         else -> repository.insert(ClipDraft(text, hints)).let { IngestResult.Stored(it.id, it.duplicate, it.sensitive) }
     }
 }

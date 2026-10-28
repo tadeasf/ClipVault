@@ -31,7 +31,7 @@ class AppGraph(private val app: Application) {
     }
     val settings by lazy { SqlSettingsRepository(db, io) }
     val repository by lazy { SqlClipRepository(db, deviceId(db), System::currentTimeMillis, io) }
-    val ingest by lazy { ClipIngest(repository) { settings.settings.value.excludedPackages } }
+    val ingest by lazy { ClipIngest(repository) { it.sourcePackage in settings.settings.value.excludedPackages } }
 
     /** Capture entry used by every path: ingest, then housekeeping. */
     suspend fun capture(text: String, hints: ClipHints): IngestResult {

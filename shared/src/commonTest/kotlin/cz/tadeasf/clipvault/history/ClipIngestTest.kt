@@ -31,7 +31,7 @@ class ClipIngestTest {
 
     private val repository = RecordingRepository()
     private val excluded = mutableSetOf<String>()
-    private val ingest = ClipIngest(repository) { excluded }
+    private val ingest = ClipIngest(repository) { it.sourcePackage in excluded }
 
     @Test
     fun storesTextWithHints() = runTest {

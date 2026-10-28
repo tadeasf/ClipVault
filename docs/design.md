@@ -30,8 +30,8 @@ the root when no server target is selected. We keep that and add modules for the
              sensitive detection, transformations, grouping, settings model. ClipboardSource,
              key storage and file-path expect/actuals. NO network code, no Ktor, no mDNS.
 :ui          KMP Compose module: history list, clip detail, settings screens and their
-             ViewModels, shared by both apps (wizard puts shared UI in `shared`; we split it out
-             so :shared stays UI-free).
+             ViewModels. Android-only in product terms since step 4 (its jvm target exists only so
+             the ViewModel tests run on the JVM).
 :sync-core   KMP (android + jvm). Sync protocol, conflict resolution, sync bookkeeping DB
              (separate SQLDelight database), crypto, pairing, Ktor server/client, discovery
              expect/actuals (NsdManager / JmDNS), sync UI screens.
@@ -39,8 +39,11 @@ the root when no server target is selected. We keep that and add modules for the
              Wi-Fi allowlist, DI wiring, the network permissions in its manifest.
 :androidApp  com.android.application. Activity, capture components, flavors vault/sync.
              Only `syncImplementation(project(":sync"))` pulls in :sync and :sync-core.
-:desktopApp  Compose for Desktop. Window, tray, hotkey, clipboard watcher, packaging. Depends on
-             :shared, :ui, :sync-core.
+:desktopApp  `clipvault-agent` (step 4): a headless daemon + CLI, systemd user service. CopyQ is
+             the desktop front end; the agent captures through it, keeps the encrypted store (the
+             sync source of truth) and writes phone-origin clips into CopyQ. The Compose desktop
+             target stays in the build for a small pairing/status window (step 8). Depends on
+             :shared, :sync-core. See section 11.
 ```
 
 **Deviation from the brief, flagged:** the brief puts the sync protocol, crypto and mDNS in
@@ -268,28 +271,33 @@ Also:
 - **Privacy note on CopyQ itself:** running CopyQ alongside ClipVault means a second history that
   CopyQ stores unencrypted under `~/.local/share/copyq`, sensitive items included. The UI says so
   when it detects the CopyQ extension. Users can keep the extension and quit the CopyQ app.
-- **Desktop capture order:**
-  1. CopyQ extension D-Bus, when present on GNOME.
-  2. `wl-paste --watch`, when the compositor supports data-control (KDE, Sway, Hyprland and others).
-  3. AWT polling as the X11 / last-resort path, labelled "may miss copies" on Wayland.
+- **Desktop capture order (revised at step 4, section 11):**
+  1. A CopyQ automatic command that hands every new clipboard item to `clipvault-agent ingest`.
+  2. The CopyQ GNOME extension over D-Bus, when the command is not installed.
+  3. No local capture (sync only) when CopyQ is absent. `wl-paste --watch` and AWT polling are
+     dropped: CopyQ is the front end now.
 
 ### 6.4 Other desktop points
 
-- **Tray:** AWT `SystemTray` (which Compose `Tray` uses) does not show icons on GNOME Wayland or
-  KDE (JDK-8146318, still open). Plan: implement a StatusNotifierItem over dbus-java (the same
-  dependency as the keyring fallback). On GNOME that still needs the AppIndicator extension, which
-  most distros ship. We fall back to "no tray, window only" and say so in the UI.
-- **Global hotkey:** the XDG `GlobalShortcuts` portal works on GNOME 48+ and KDE
-  (https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.GlobalShortcuts.html).
-  JNativeHook is X11-only. Plan: use the portal over dbus-java, and treat the hotkey as optional,
-  as the brief allows.
+- **Tray and global hotkey: dropped at step 4.** CopyQ already provides both. The research stays
+  for reference:
+  - AWT `SystemTray` (which Compose `Tray` uses) shows no icons on GNOME Wayland or KDE
+    (JDK-8146318).
+  - The XDG `GlobalShortcuts` portal works on GNOME 48+ and KDE.
 - **Per-window-class exclusion:** this works on X11 via `_NET_ACTIVE_WINDOW` + `WM_CLASS`. No
-  standard Wayland protocol exposes the active window, so on Wayland it is unavailable, except
-  through the GNOME extension if we build one.
-- **Packaging:** the Compose Gradle plugin builds `.deb` and `.rpm` on Linux. It builds no
-  AppImage (https://kotlinlang.org/docs/multiplatform/compose-native-distribution.html). Plan:
-  produce the jpackage app-image directory and wrap it with `appimagetool` in CI. That is a build
-  tool, not a runtime dependency.
+  standard Wayland protocol exposes the active window.
+  - **Confirmed at step 4:** on GNOME 50 Wayland, CopyQ's `currentWindowTitle()` and
+    `currentClipboardOwner()` return empty strings, and the GNOME extension's D-Bus interface carries
+    no window information.
+  - **Consequence:** neither capture path knows the source app there, so desktop exclusions and the
+    password-manager window-title rule only work where CopyQ reports a title (X11, some
+    compositors).
+- **Packaging (moved to step 4):** the Compose Gradle plugin builds `.deb` and `.rpm` on Linux, but
+  no AppImage (https://kotlinlang.org/docs/multiplatform/compose-native-distribution.html).
+  - **AppImage:** CI wraps the jpackage app-image with `appimagetool`, a build tool and not a
+    runtime dependency.
+  - **Where each format is built:** `.rpm` locally, since `rpmbuild` is on the dev machine; `.deb`
+    and AppImage in CI on Ubuntu.
 
 ### 6.5 Android sync flavor
 
@@ -381,11 +389,17 @@ The brief's steps 0-9 stay as given. Adjustments:
 - **Step 0:** generate with the wizard, add `:ui`, `:sync-core` and `:sync` as empty modules,
   set up flavors, and add a CI job (GitHub Actions) that runs `processVaultReleaseManifest` and
   greps the merged manifest. Both apps launch with placeholder UI.
-- **Step 3:** the capture path depends on question 1.
-- **Step 4:** the GNOME path depends on question 2.
+- **Step 3:** done. Android capture paths, shared UI, settings.
+- **Step 4 (revised 2026-10-28):** `clipvault-agent`, a headless daemon with CopyQ as the desktop
+  front end, replaces the Compose desktop history UI (section 11).
+  - **Moved here from step 9:** packaging (`.rpm`/`.deb`/AppImage) and the systemd user unit.
+  - **Dropped:** tray, global hotkey and the desktop history/detail/settings screens.
 - **Step 5:** the sync bookkeeping DB lives in `:sync-core`, catch-up is seq-based, and metadata
   changes are log entries (5.1).
 - **Step 6:** `docs/sync/handshake.md` is written and reviewed before any handshake code.
+- **Step 7:** transport and discovery, plus the agent's sync loop.
+- **Step 8:** the sync UI on Android, plus a small Compose desktop window for pairing and status.
+- **Step 9:** hardening. Desktop packaging already landed in step 4.
 
 ## 8. Decisions (answered 2026-10-28)
 
@@ -544,7 +558,7 @@ another app is in front.
     sample) and `:androidApp`. Dex merging kept the wrong one, causing a `NoSuchMethodError`. The
     app's class is now `AndroidAppPlatform`.
 
-### 10.4 Open: CopyQ as the desktop front end (raised 2026-10-28)
+### 10.4 CopyQ as the desktop front end (raised and decided 2026-10-28)
 
 The idea: keep CopyQ on the desktop and use ClipVault on the phone, with history synced between
 them. It is feasible with CopyQ 17's CLI: `add`, `insert`, `read`, `write`, `remove`, `count`
@@ -560,5 +574,88 @@ and `tab`, plus its scripting.
 - **Privacy cost:** CopyQ's tab files are unencrypted unless its tab encryption (GnuPG) is on, and
   on the dev machine `encrypt_tabs=false`. Synced phone clips would therefore sit on disk in
   plaintext, which breaks principle 3 for them. Sensitive clips would never be written to CopyQ.
-- **Effect on the plan:** step 4 shrinks to tray + settings + pairing + the sync agent, and the
-  CopyQ bridge joins step 7 or 8. Decision pending.
+- **Decided 2026-10-28: go.** See section 11.
+
+## 11. `clipvault-agent`: desktop daemon, CopyQ as front end (step 4)
+
+### 11.1 Roles
+- **CopyQ** is what the user sees and uses on the desktop: history, search, tray, hotkeys.
+- **The agent** has no history UI. It owns the encrypted SQLDelight store, the same step-1 code as
+  Android, which is the desktop's sync source of truth. CopyQ is only a view: the agent writes to
+  it and never assumes CopyQ still holds anything, because CopyQ's own dedupe and retention may
+  drop items.
+
+### 11.2 Process model
+- **`clipvault-agent run`** is the daemon, started by the systemd user unit. It is the only
+  process that writes the store.
+  - It listens on `$XDG_RUNTIME_DIR/clipvault/agent.sock`, inside a 0700 directory.
+  - It flushes the CopyQ outbox and runs retention.
+  - It never reads the clipboard at start, so a restart cannot double-ingest what is already
+    there.
+- **`clipvault-agent ingest [--title T] [--non-text]`** is invoked by the CopyQ command, with the
+  clip text on stdin, never in argv. It forwards the text to the daemon over the socket. If no
+  daemon answers, it opens the store and ingests itself (same code), so nothing is lost while the
+  service is down. It always exits 0: CopyQ does not need to see our errors.
+- **Other subcommands:**
+  - `status`: daemon, store, capture mode, counters, CopyQ state and encryption, outbox backlog.
+  - `install-copyq`: idempotent; adds or replaces only the command named "ClipVault ingest".
+  - `install-service`: writes and enables the systemd user unit.
+  - `push-test TEXT`: pushes TEXT into CopyQ the way a phone-origin clip would travel.
+  - `config KEY [VALUE]`.
+
+### 11.3 CopyQ facts the design relies on (verified against CopyQ 17.0.0 and its docs)
+- **Automatic commands:** these run on every new clipboard item. `data(mimeText)` returns the
+  clipboard text, and `execute(prog, args..., null, stdin)` runs a program with stdin.
+  Commands are managed with `commands()` / `setCommands()`, so the installer edits only its own
+  entry and keeps the user's other commands, for example their automatic "Archive to history".
+- **Window title:** `mimeWindowTitle` (`application/x-copyq-owner-window-title`) comes from
+  `currentWindowTitle()`, which is **empty on GNOME 50 Wayland** (6.4). The command passes
+  `--title` only when it is non-empty.
+- **`mimeOwner`:** a clipboard set by CopyQ itself, for example via `copyq copy`, is ignored by
+  CopyQ, and no automatic command runs on it (scripting docs, `mimeOwner`). So with
+  `promote_to_clipboard` on, CopyQ itself breaks the capture loop.
+- **Reading text from stdin:** `copyq tab NAME add -` takes the text on stdin; tested.
+- **Escape processing:** CopyQ's CLI processes escape sequences in arguments (`\n`, `\"`), which
+  breaks JavaScript passed as `copyq eval SCRIPT`. The installer therefore sends its script with
+  `copyq eval -` on stdin. Found on the dev machine at step 4, when the first install failed with a
+  SyntaxError.
+- **Clipboard tab name:** the user's clipboard tab is the value of `copyq config clipboard_tab`
+  (`&clipboard` on the dev machine, with a mnemonic `&`). That is the default target. A literal
+  `clipboard` would create a second tab.
+- **Encryption:** CopyQ 17 has built-in tab encryption (`copyq config encrypt_tabs`, readable from
+  the CLI). Turning it on needs a password set in the UI, so `install-copyq` only checks and prints
+  instructions. `status` reports `copyq: tabs unencrypted` while it is off.
+
+### 11.4 Data flows
+- **Desktop to store:**
+  1. CopyQ command -> `ingest`.
+  2. `ClipIngest`: blank, sensitive source, excluded app.
+  3. `SensitiveDetector` and content type.
+  4. Store.
+  - Non-UTF-8 or non-text input is counted and dropped.
+  - Content-sensitive clips (OTP, card...) are stored hidden and expire after the sensitive TTL,
+    as on Android. They are never written to CopyQ. CopyQ itself already has them, because it
+    captured first. ClipVault cannot prevent that and does not reach into CopyQ's history.
+- **Store to CopyQ (phone-origin clips from step 5; plumbing and `push-test` now):**
+  - **Outbox:** queued in the store's `Setting` table under `agent.copyqOutbox`, so it survives
+    restarts. The daemon flushes it whenever `copyq` answers, via `copyq tab TAB add -`.
+  - **Promote:** with `promote_to_clipboard` on, the clip is also put on the live clipboard via
+    `copyq copy -`.
+  - **Never written:** sensitive clips and clips from excluded apps.
+  - **Loop guard:** CopyQ's `mimeOwner` rule stops CopyQ from re-capturing. The agent also keeps
+    a 30 s echo set of content hashes it promoted, and drops matching ingests before they reach
+    `ClipIngest`. That covers the D-Bus fallback path, which sees every owner change.
+- **CopyQ missing:**
+  - Not running: the outbox grows and `status` shows the backlog.
+  - Not installed: the agent runs sync-only and `status` says so.
+
+### 11.5 Keys and headless start
+The store key comes from the Secret Service (dbus-java). With no keyring, the passphrase fallback
+needs a terminal. `run` in a terminal prompts for the passphrase; as a systemd service it exits
+with a clear message, because a headless daemon has nowhere to ask.
+
+### 11.6 Desktop exclusions
+`excludedPackages` matches the window title CopyQ reports, a case-insensitive substring per
+entry. On GNOME Wayland there is no title, so exclusions are inert there (6.4).
+`clipvault-agent config exclude "KeePassXC"` adds one. The built-in password-manager titles
+(`KnownSensitiveSources`) still apply where a title exists.
