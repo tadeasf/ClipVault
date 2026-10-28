@@ -126,7 +126,7 @@ private fun Theme(current: ThemeMode, select: (ThemeMode) -> Unit) {
 }
 
 @Composable
-private fun Section(title: String) = Text(title, style = MaterialTheme.typography.titleMedium)
+internal fun Section(title: String) = Text(title, style = MaterialTheme.typography.titleMedium)
 
 @Composable
 private fun SwitchRow(label: String, checked: Boolean, tag: String, onChange: (Boolean) -> Unit) {
