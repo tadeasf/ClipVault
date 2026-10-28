@@ -11,11 +11,17 @@ where it was verified (2026-10-28). Update both together.
 | Compose Multiplatform | 1.12.2 | https://github.com/JetBrains/compose-multiplatform/blob/master/CHANGELOG.md | |
 | CMP material3 | 1.12.0-alpha03 | KMP wizard output | Wizard pins an alpha |
 | androidx lifecycle (JB) | 2.11.0 | KMP wizard output | |
-| kotlinx-coroutines | 1.11.0 | KMP wizard output | |
+| kotlinx-coroutines | 1.11.0 | KMP wizard output | also `kotlinx-coroutines-test` |
 | compileSdk / targetSdk / minSdk | 37 / 37 / 26 | local SDK | targetSdk 37 means `ACCESS_LOCAL_NETWORK` is enforced for `sync` |
 | JVM toolchain | 21 (Azul) | `gradle/gradle-daemon-jvm.properties` | bytecode target JVM 11 as generated |
+| SQLDelight | 2.4.1 | https://github.com/sqldelight/sqldelight/releases | plugin + android-driver, sqlite-driver, androidx-paging3-extensions |
+| AndroidX Paging | 3.5.3 | Google Maven `paging-common` metadata (2026-10-12) | jvm variant published as `paging-common-desktop` |
+| androidx.sqlite | 2.7.0 | sqlcipher-android 4.20.0 POM dependency | the version sqlcipher-android is built against |
+| sqlcipher-android | 4.20.0 | Maven Central (2026-10-27), https://github.com/sqlcipher/sqlcipher-android | `.so` built with `ENABLE_FTS5` |
+| sqlite-jdbc-crypt | 3.53.4.0 | Maven Central (2026-07-26), https://github.com/Willena/sqlite-jdbc-crypt | replaces `org.xerial:sqlite-jdbc` under sqlite-driver |
+| BouncyCastle bcprov | 1.86 | Maven Central (2026-09-11) | Argon2id for the desktop key-file fallback |
+| Kover | 0.9.11 | https://github.com/Kotlin/kotlinx-kover (2026-09-29) | host-JVM tests only |
 
 Added in later steps (verified in `docs/design.md` section 4, pinned when first used):
-SQLDelight 2.4.1, AndroidX Paging 3.5.3, Ktor 3.6.0, kotlinx-serialization 1.12.0, Kover 0.9.11,
-sqlcipher-android 4.20.0, sqlite-jdbc-crypt 3.53.4.0, Tink 1.24.0, BouncyCastle 1.86, JmDNS 3.6.4,
-zxing core 3.5.4, dbus-java 5.2.2.
+Ktor 3.6.0, kotlinx-serialization 1.12.0, Tink 1.24.0, JmDNS 3.6.4, zxing core 3.5.4,
+dbus-java 5.2.2.

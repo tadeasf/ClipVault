@@ -1,0 +1,88 @@
+import cz.tadeasf.clipvault.model.ContentType;
+import kotlin.Boolean;
+
+-- Column order matches the domain Clip constructor, so queries map with ::Clip.
+CREATE TABLE Clip (
+  id TEXT NOT NULL PRIMARY KEY,
+  deviceId TEXT NOT NULL,
+  createdAt INTEGER NOT NULL,
+  contentType TEXT AS ContentType NOT NULL,
+  contentHash TEXT NOT NULL,
+  content TEXT NOT NULL,
+  sensitive INTEGER AS Boolean NOT NULL,
+  pinned INTEGER AS Boolean NOT NULL DEFAULT 0,
+  deleted INTEGER AS Boolean NOT NULL DEFAULT 0,
+  lamportClock INTEGER NOT NULL
+);
+
+CREATE INDEX clip_list ON Clip(deleted, pinned, createdAt);
+CREATE INDEX clip_hash ON Clip(contentHash);
+
+-- Full-text index keyed by Clip.rowid, kept in sync by the triggers below.
+CREATE VIRTUAL TABLE ClipFts USING fts5(content);
+
+CREATE TRIGGER clip_fts_insert AFTER INSERT ON Clip BEGIN
+  INSERT INTO ClipFts(rowid, content) VALUES (new.rowid, new.content);
+END;
+
+CREATE TRIGGER clip_fts_delete AFTER DELETE ON Clip BEGIN
+  DELETE FROM ClipFts WHERE rowid = old.rowid;
+END;
+
+-- Delete + insert: `UPDATE ClipFts SET content = new.content` overflows SQLDelight 2.4.1's resolver.
+CREATE TRIGGER clip_fts_update AFTER UPDATE OF content ON Clip BEGIN
+  DELETE FROM ClipFts WHERE rowid = old.rowid;
+  INSERT INTO ClipFts(rowid, content) VALUES (new.rowid, new.content);
+END;
+
+insert:
+INSERT INTO Clip(id, deviceId, createdAt, contentType, contentHash, content, sensitive, lamportClock)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+selectById:
+SELECT * FROM Clip WHERE id = ?;
+
+findLiveByHash:
+SELECT id FROM Clip WHERE contentHash = ? AND deleted = 0 LIMIT 1;
+
+touch:
+UPDATE Clip SET createdAt = :createdAt WHERE id = :id;
+
+setFlags:
+UPDATE Clip SET pinned = :pinned, deleted = :deleted WHERE id = :id;
+
+-- A deleted clip keeps its row (tombstone for sync) but loses its content.
+wipeContent:
+UPDATE Clip SET content = '', contentHash = '' WHERE id = ?;
+
+-- includeSensitive = 1 matches both values of `sensitive`; 0 matches only non-sensitive rows.
+countLive:
+SELECT count(*) FROM Clip
+WHERE deleted = 0 AND (sensitive = 0 OR sensitive = :includeSensitive);
+
+page:
+SELECT * FROM Clip
+WHERE deleted = 0 AND (sensitive = 0 OR sensitive = :includeSensitive)
+ORDER BY pinned DESC, createdAt DESC
+LIMIT :limit OFFSET :offset;
+
+countSearch:
+SELECT count(*) FROM Clip
+JOIN ClipFts ON ClipFts.rowid = Clip.rowid
+WHERE ClipFts MATCH :query AND Clip.deleted = 0 AND (Clip.sensitive = 0 OR Clip.sensitive = :includeSensitive);
+
+search:
+SELECT Clip.* FROM Clip
+JOIN ClipFts ON ClipFts.rowid = Clip.rowid
+WHERE ClipFts MATCH :query AND Clip.deleted = 0 AND (Clip.sensitive = 0 OR Clip.sensitive = :includeSensitive)
+ORDER BY Clip.pinned DESC, Clip.createdAt DESC
+LIMIT :limit OFFSET :offset;
+
+-- Retention is a local policy: rows are removed outright, not tombstoned, and pinned clips are exempt.
+deleteOlderThan:
+DELETE FROM Clip WHERE pinned = 0 AND createdAt < ?;
+
+keepNewest:
+DELETE FROM Clip WHERE pinned = 0 AND id NOT IN (
+  SELECT id FROM Clip WHERE pinned = 0 ORDER BY createdAt DESC LIMIT ?
+);
