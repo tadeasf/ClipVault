@@ -433,6 +433,16 @@ The brief's steps 0-9 stay as given. Adjustments:
 - **Step 6:** part A, the specs [`docs/sync/handshake.md`](sync/handshake.md) and
   [`docs/sync/pairing.md`](sync/pairing.md), is reviewed before any handshake or pairing code.
   Part B implements them against the test vectors.
+- **Step 6 part B notes (2026-10-28):**
+  - **R8:** a minified sync build needs no keep or dontwarn rule for bcprov
+    (`sync-core/consumer-rules.pro`). The test-only `minifiedCheck` build type keeps the sync code
+    reachable (`androidApp/r8-check.pro`), and `SyncCryptoOnDeviceTest` passes in it on the device.
+    The other keeps in that file only exist so the older instrumented tests can reach app internals.
+  - **mDNS and the desktop firewall:** Fedora's `FedoraWorkstation` firewalld zone opens TCP and
+    UDP 1025-65535 but not the `mdns` service (UDP 5353).
+    - `pair --join` discovery therefore finds nothing on such a machine; `--join --addr` works.
+    - Step 7 has to handle the same problem for discovery: detect it, say so in `status`, and tell
+      the user how to allow mDNS. The app never changes the firewall itself (section 12).
 - **Step 7:** transport and discovery, plus the agent's sync loop.
   - **Required:** each `SyncNode` runs on one single-threaded dispatcher. A
     convergence-under-concurrency test (local writes, received events and several live sessions

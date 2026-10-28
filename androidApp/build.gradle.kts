@@ -48,7 +48,19 @@ android {
                 "proguard-rules.pro"
             )
         }
+        // Test-only: release + R8, debug-signed so instrumented tests can run against it
+        // (`-Pclipvault.testBuildType=minifiedCheck`). r8-check.pro keeps the sync code reachable, as the
+        // step 8 UI will, so R8 really processes BouncyCastle instead of dropping it as unused.
+        create("minifiedCheck") {
+            initWith(getByName("release"))
+            isMinifyEnabled = true
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += "release"
+            proguardFile("r8-check.pro")
+            testProguardFile("r8-check-test.pro")
+        }
     }
+    testBuildType = providers.gradleProperty("clipvault.testBuildType").getOrElse("debug")
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11

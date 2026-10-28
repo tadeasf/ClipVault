@@ -23,7 +23,10 @@ fun openStore(paths: AgentPaths): ClipDatabase = openStores(paths, withSync = fa
 fun openStores(paths: AgentPaths, withSync: Boolean = true): Pair<ClipDatabase, SyncDatabase?> {
     paths.prepare()
     val keyFile = PassphraseKeyFile(paths.keyFile, ::askPassphrase)
-    val provider = DesktopDbKeyProvider(SecretServiceKeyring.detect(), keyFile)
+    // CLIPVAULT_KEYRING=none: passphrase file only, the Secret Service is never contacted (a second test
+    // instance must not touch the keyring entry, whose account name is fixed).
+    val keyring = if (System.getenv("CLIPVAULT_KEYRING") == "none") null else SecretServiceKeyring.detect()
+    val provider = DesktopDbKeyProvider(keyring, keyFile)
     val drivers = JvmDriverFactory(paths.database)
     val key = try {
         provider.keyFor(drivers.exists())

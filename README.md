@@ -45,10 +45,15 @@ clipvault-agent status
   is the case. ClipVault never changes CopyQ's encryption: `clipvault-agent install-copyq
   --check-encryption` only reports it (exit 1 while off) and prints how to turn it on in CopyQ's
   Preferences, with a password you choose.
+- **No keyring:** `CLIPVAULT_KEYRING=none` makes the agent use the passphrase-protected key file
+  and never contact a Secret Service. That needs a terminal for the passphrase.
 - **Lost keyring:** if the store's key is gone (for example, the keyring was replaced), the
   service exits once with status 78 and a one-line message, instead of restarting in a loop. Move
   `~/.local/share/clipvault/history.db` aside and restart the service to start a new, empty
   history.
+- **Pairing two desktops:** `clipvault-agent pair --code` on one, `pair --join` on the other. If
+  `--join` finds nothing, the firewall is probably dropping mDNS (Fedora Workstation's default zone
+  does). Use `pair --join --addr HOST:PORT` (printed by `pair --code`), or allow mDNS yourself.
 - **GNOME on Wayland:** CopyQ cannot tell which app a clip came from, so per-app exclusions are
   unavailable on GNOME for now. A small ClipVault GNOME extension that reports the focused app is
   planned for step 9. Exclusions work where CopyQ reports a window title (X11, some compositors).
