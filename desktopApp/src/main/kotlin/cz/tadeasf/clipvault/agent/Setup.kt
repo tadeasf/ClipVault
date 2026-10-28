@@ -3,11 +3,13 @@ package cz.tadeasf.clipvault.agent
 import cz.tadeasf.clipvault.db.ClipDatabase
 import cz.tadeasf.clipvault.security.DesktopDbKeyProvider
 import cz.tadeasf.clipvault.security.PassphraseKeyFile
+import cz.tadeasf.clipvault.security.KeyUnavailableException
 import cz.tadeasf.clipvault.security.SecretServiceKeyring
 import cz.tadeasf.clipvault.security.keyFor
 import cz.tadeasf.clipvault.storage.JvmDriverFactory
 import cz.tadeasf.clipvault.storage.clipDatabase
 import java.io.File
+import java.sql.SQLException
 
 /**
  * Opens the encrypted store. Key from the Secret Service; without one, the passphrase file, which needs
@@ -18,13 +20,44 @@ fun openStore(paths: AgentPaths): ClipDatabase {
     val keyFile = PassphraseKeyFile(paths.keyFile, ::askPassphrase)
     val provider = DesktopDbKeyProvider(SecretServiceKeyring.detect(), keyFile)
     val drivers = JvmDriverFactory(paths.database)
-    return clipDatabase(drivers.open(provider.keyFor(drivers.exists())))
+    val key = try {
+        provider.keyFor(drivers.exists())
+    } catch (_: KeyUnavailableException) {
+        throw StoreKeyException.missing(paths)
+    }
+    return try {
+        clipDatabase(drivers.open(key))
+    } catch (e: SQLException) {
+        if (e.message?.contains("SQLITE_NOTADB") == true) throw StoreKeyException.wrong(paths) else throw e
+    }
+}
+
+/**
+ * The store's key is missing or does not open it. Restarting cannot fix that, so the daemon exits with
+ * [EXIT_CODE] and the unit's RestartPreventExitStatus stops systemd from looping.
+ */
+class StoreKeyException(message: String) : Exception(message) {
+    companion object {
+        /** EX_CONFIG from sysexits.h. */
+        const val EXIT_CODE = 78
+
+        private fun advice(paths: AgentPaths) =
+            "Move ${paths.database} aside to start a new, empty history, then `systemctl --user restart clipvault-agent`. Not restarting on my own."
+
+        fun missing(paths: AgentPaths) = StoreKeyException(
+            "clipvault-agent: the history store exists but its key is not in the keyring (keyring replaced or reset?). ${advice(paths)}",
+        )
+
+        fun wrong(paths: AgentPaths) = StoreKeyException(
+            "clipvault-agent: the key in the keyring does not open the history store. ${advice(paths)}",
+        )
+    }
 }
 
 private fun askPassphrase(): CharArray = System.console()?.readPassword("ClipVault passphrase: ")
-    ?: throw IllegalStateException(
-        "No Secret Service (GNOME Keyring, KWallet, KeePassXC) and no terminal to ask for a passphrase. " +
-            "Unlock or install a keyring, or run `clipvault-agent run` once in a terminal.",
+    ?: throw StoreKeyException(
+        "clipvault-agent: no Secret Service (GNOME Keyring, KWallet, KeePassXC) and no terminal to ask for a passphrase. " +
+            "Unlock or install a keyring, or run `clipvault-agent run` once in a terminal. Not restarting on my own.",
     )
 
 /** The launcher path, for commands that must call us back (CopyQ command, systemd unit). */
@@ -45,6 +78,8 @@ object SystemdUnit {
         |RestartSec=5
         |# SIGTERM ends the JVM with 143; that is a clean stop, not a failure.
         |SuccessExitStatus=143
+        |# 78: the store's key is missing or wrong; restarting cannot fix that (see the journal line).
+        |RestartPreventExitStatus=${StoreKeyException.EXIT_CODE}
         |
         |[Install]
         |WantedBy=graphical-session.target

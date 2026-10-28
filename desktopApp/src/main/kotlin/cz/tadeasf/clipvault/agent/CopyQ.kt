@@ -7,7 +7,8 @@ import java.util.concurrent.TimeUnit
 /**
  * The `copyq` command line. Clip text always goes over stdin (`-`), never argv, so it never shows up
  * in `ps`. [binary] is overridable so tests can point at a fake; [session] targets a separate CopyQ
- * session (`copyq -s NAME`), which is how the encryption setup is rehearsed without touching the real one.
+ * session (`copyq -s NAME`) for tests that must not touch the user's CopyQ. The only thing the agent
+ * ever writes to CopyQ's configuration is its own automatic command (design section 12).
  */
 class CopyQ(
     private val binary: String = "copyq",
@@ -43,8 +44,6 @@ class CopyQ(
 
     fun config(option: String): String? = run(listOf("config", option)).takeIf { it.ok }?.out?.trim()
 
-    fun setConfig(option: String, value: String): String? = run(listOf("config", option, value)).takeIf { it.ok }?.out?.trim()
-
     fun clipboardTab(): String? = config("clipboard_tab")?.ifEmpty { null }
 
     /** Null when CopyQ can't say (not running, old version). */
@@ -70,8 +69,6 @@ class CopyQ(
         """.trimIndent()
         return evalScript(script) == "removed"
     }
-
-    fun exitServer(): Boolean = run(listOf("exit")).ok
 
     fun commandInstalled(): Boolean =
         run(listOf("eval", "commands().some(function (c) { return c.name == ${jsString(COMMAND_NAME)}; })")).out.trim() == "true"
