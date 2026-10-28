@@ -45,7 +45,10 @@ object WireCodec {
     /** For logs and tests only; never sent. */
     fun debugJson(message: Message): String = json.encodeToString(Message.serializer(), message)
 
-    private val TYPES = setOf("hello", "catchup_request", "catchup_batch", "push", "ack", "fetch_payload", "payload", "bye")
+    private val TYPES = setOf(
+        "hello", "catchup_request", "catchup_batch", "push", "ack", "fetch_payload", "payload", "bye",
+        "identity", "pair_confirm", "revoke", // 1.1
+    )
 
     /** The same names as the classes' @SerialName (checked by WireTest). */
     fun typeOf(message: Message): String = when (message) {
@@ -57,5 +60,8 @@ object WireCodec {
         is FetchPayload -> "fetch_payload"
         is Payload -> "payload"
         is Bye -> "bye"
+        is Identity -> "identity"
+        is PairConfirm -> "pair_confirm"
+        is Revoke -> "revoke"
     }
 }

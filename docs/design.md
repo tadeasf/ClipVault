@@ -433,6 +433,20 @@ The brief's steps 0-9 stay as given. Adjustments:
 - **Step 6:** part A, the specs [`docs/sync/handshake.md`](sync/handshake.md) and
   [`docs/sync/pairing.md`](sync/pairing.md), is reviewed before any handshake or pairing code.
   Part B implements them against the test vectors.
+- **Step 6 part B notes (2026-10-28):**
+  - **R8:** a minified sync build needs no keep or dontwarn rule for bcprov
+    (`sync-core/consumer-rules.pro`). The test-only `minifiedCheck` build type keeps the sync code
+    reachable (`androidApp/r8-check.pro`), and `SyncCryptoOnDeviceTest` passes in it on the device.
+    The other keeps in that file only exist so the older instrumented tests can reach app internals.
+  - **mDNS discovery:** `pair --join` (mDNS) and `pair --join --addr` both work end to end, two
+    agent instances on one machine with mDNS allowed in the firewall.
+    - **Browse timing:** a fresh JmDNS instance's first `list()` often returns before anything is
+      resolved. Plain JmDNS on this machine found nothing in 3 s, then found the service on the next
+      call. `--join` therefore browses in 2 s rounds for up to 10 s.
+    - **Firewall:** Fedora's `FedoraWorkstation` firewalld zone opens TCP and UDP 1025-65535 but not
+      the `mdns` service (UDP 5353); the user allowed it. Not tested: discovery with mDNS blocked
+      after the timing fix. Step 7 should detect a blocked mDNS for discovery, say so in `status`,
+      and point to `--addr`. The app never changes the firewall itself (section 12).
 - **Step 7:** transport and discovery, plus the agent's sync loop.
   - **Required:** each `SyncNode` runs on one single-threaded dispatcher. A
     convergence-under-concurrency test (local writes, received events and several live sessions
@@ -791,3 +805,15 @@ These bind both the code and whoever works on it, including the assistant in a s
    - Reading code or docs is reported as "read in source" or "per the docs".
 5. **No user data in tests** (11.9): no rows from the user's CopyQ, ClipVault store or clipboard;
    test data is generated, and lives in a `clipvault-test` tab or a throwaway session.
+6. **No keyring daemons on the user's machine (from 2026-10-28, no exceptions).**
+   - Nobody starts `gnome-keyring-daemon`, a `dbus-run-session` with a keyring, or any other Secret
+     Service daemon on the user's machine, under any `HOME` or `XDG_DATA_HOME`. There are no
+     "temp dir" variants either.
+   - Keyring integration (`DesktopKeyTest.secretServiceRoundTrip`) is tested only in CI, on a fresh
+     runner.
+   - Locally, the root build gives every JVM test task a session bus address that can't connect, so
+     no test reaches a Secret Service. Keyring-dependent tests use the in-process fake (`FakeKeyring`
+     in `DesktopKeyTest`) or are skipped, and the skips are listed in the step report.
+   - **Why:** on 2026-10-28, "throwaway" keyring daemons started for local test runs used the real
+     `~/.local/share/keyrings` and rewrote the user's `login.keyring`, twice (17:36 and 19:26). The
+     first time cost the CopyQ history and the ClipVault store.

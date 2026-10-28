@@ -48,3 +48,6 @@ UPDATE LamportClock SET value = max(value, :seen) + 1 WHERE id = 1;
 
 currentClock:
 SELECT value FROM LamportClock WHERE id = 1;
+
+relabelDevice:
+UPDATE ClipMember SET deviceId = :new WHERE deviceId = :old;

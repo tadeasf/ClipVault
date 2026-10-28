@@ -45,10 +45,15 @@ clipvault-agent status
   is the case. ClipVault never changes CopyQ's encryption: `clipvault-agent install-copyq
   --check-encryption` only reports it (exit 1 while off) and prints how to turn it on in CopyQ's
   Preferences, with a password you choose.
+- **No keyring:** `CLIPVAULT_KEYRING=none` makes the agent use the passphrase-protected key file
+  and never contact a Secret Service. That needs a terminal for the passphrase.
 - **Lost keyring:** if the store's key is gone (for example, the keyring was replaced), the
   service exits once with status 78 and a one-line message, instead of restarting in a loop. Move
   `~/.local/share/clipvault/history.db` aside and restart the service to start a new, empty
   history.
+- **Pairing two desktops:** `clipvault-agent pair --code` on one, `pair --join` on the other. If
+  `--join` finds nothing, check that the firewall allows mDNS (UDP 5353; Fedora Workstation's
+  default zone doesn't), or use `pair --join --addr HOST:PORT` as printed by `pair --code`.
 - **GNOME on Wayland:** CopyQ cannot tell which app a clip came from, so per-app exclusions are
   unavailable on GNOME for now. A small ClipVault GNOME extension that reports the focused app is
   planned for step 9. Exclusions work where CopyQ reports a window title (X11, some compositors).
@@ -65,6 +70,8 @@ clipvault-agent status
   or the keyring without an explicit yes, a timestamped backup to
   `~/clipvault-backups/<app>-<timestamp>/` before any such change, and "verified" only for things
   that were actually run.
+- Tests never start a keyring daemon on a developer's machine. The Secret Service integration test
+  runs in CI only; local test runs can't reach a session bus at all (see the root `build.gradle.kts`).
 
 ## Modules
 

@@ -30,3 +30,6 @@ SELECT count(*) FROM MetaEvent WHERE clipId = ? AND field = ? AND value = ? AND 
 
 after:
 SELECT * FROM MetaEvent WHERE seq > :since ORDER BY seq LIMIT :limit;
+
+relabelDevice:
+UPDATE MetaEvent SET deviceId = :new WHERE deviceId = :old;

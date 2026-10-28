@@ -32,3 +32,65 @@ INSERT OR REPLACE INTO EventOrigin(seq, peerId) VALUES (?, ?);
 
 origin:
 SELECT peerId FROM EventOrigin WHERE seq = ?;
+
+forgetCursor:
+DELETE FROM PeerCursor WHERE peerId = ?;
+
+countCursors:
+SELECT count(*) FROM PeerCursor;
+
+-- This device's Ed25519 identity seed (handshake.md section 2). Created by enableSync.
+CREATE TABLE Identity (
+  id INTEGER NOT NULL PRIMARY KEY CHECK (id = 1),
+  seed BLOB NOT NULL
+);
+
+-- Paired devices (pairing.md section 3). name is already sanitised.
+CREATE TABLE PeerIdentity (
+  publicKey BLOB NOT NULL PRIMARY KEY,
+  name TEXT NOT NULL,
+  firstSeen INTEGER NOT NULL,
+  lastSeen INTEGER NOT NULL
+);
+
+-- Unpaired while unreachable: a connection from it may only receive Revoke (pairing.md section 4).
+CREATE TABLE PendingRevoke (
+  publicKey BLOB NOT NULL PRIMARY KEY,
+  until INTEGER NOT NULL
+);
+
+identity:
+SELECT seed FROM Identity WHERE id = 1;
+
+createIdentity:
+INSERT INTO Identity(id, seed) VALUES (1, ?);
+
+peers:
+SELECT * FROM PeerIdentity ORDER BY firstSeen;
+
+peer:
+SELECT * FROM PeerIdentity WHERE publicKey = ?;
+
+countPeers:
+SELECT count(*) FROM PeerIdentity;
+
+insertPeer:
+INSERT OR IGNORE INTO PeerIdentity(publicKey, name, firstSeen, lastSeen) VALUES (:publicKey, :name, :now, :now);
+
+renamePeer:
+UPDATE PeerIdentity SET name = :name, lastSeen = :now WHERE publicKey = :publicKey;
+
+seenPeer:
+UPDATE PeerIdentity SET lastSeen = :now WHERE publicKey = :publicKey;
+
+deletePeer:
+DELETE FROM PeerIdentity WHERE publicKey = ?;
+
+pendingRevokes:
+SELECT publicKey FROM PendingRevoke WHERE until > ?;
+
+addPendingRevoke:
+INSERT OR REPLACE INTO PendingRevoke(publicKey, until) VALUES (?, ?);
+
+deletePendingRevoke:
+DELETE FROM PendingRevoke WHERE publicKey = ?;

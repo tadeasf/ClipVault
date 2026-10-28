@@ -14,6 +14,8 @@ dependencies {
     implementation(libs.kotlinx.coroutinesCore)
     implementation(libs.dbus.java.core) // GNOME extension fallback capture
     implementation(libs.dbus.java.transport)
+    implementation(libs.zxing.core) // pairing QR in the terminal and as PNG (pairing.md section 5)
+    implementation(libs.jmdns) // pairing=1 advertisement and `pair --join` discovery
     runtimeOnly(libs.slf4j.nop) // dbus-java logs through slf4j; without a provider it prints a warning on every start
 
     // Only the runtime, which the Compose compiler plugin insists on. compose.desktop.currentOs (Skia natives,
@@ -29,8 +31,9 @@ compose.desktop {
         mainClass = "cz.tadeasf.clipvault.agent.MainKt"
 
         nativeDistributions {
-            // AppImage = jpackage app-image directory; CI wraps it with appimagetool.
-            targetFormats(TargetFormat.Rpm, TargetFormat.Deb, TargetFormat.AppImage)
+            // AppImage = jpackage app-image directory; scripts/package-linux.sh builds the .rpm from it with rpmbuild
+            // (to put the CLI on PATH), patches jpackage's .deb, and wraps the AppImage.
+            targetFormats(TargetFormat.Deb, TargetFormat.AppImage)
             packageName = "clipvault-agent"
             packageVersion = "0.4.0"
             description = "ClipVault agent: encrypted clipboard history with CopyQ as the desktop front end"

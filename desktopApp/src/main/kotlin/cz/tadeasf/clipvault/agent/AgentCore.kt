@@ -38,7 +38,8 @@ class AgentCore(
 ) {
     val state = AgentState(db)
     val settings = SqlSettingsRepository(db, io)
-    val repository = SqlClipRepository(db, deviceId(db), now, io)
+    // Read per write: `pair` may enable sync (and switch the id) while this daemon runs.
+    val repository = SqlClipRepository(db, { deviceId(db) }, now, io)
     private val ingest = ClipIngest(repository) { state.isExcluded(it.sourceWindowTitle) }
 
     /** Content hashes this agent put on the live clipboard, with when; a re-capture of them is an echo. */

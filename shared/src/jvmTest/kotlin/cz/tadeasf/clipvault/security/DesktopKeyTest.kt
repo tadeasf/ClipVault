@@ -85,9 +85,13 @@ class DesktopKeyTest {
         assertContentEquals(fileKey, provider.loadKey())
     }
 
-    /** Talks to the real Secret Service; skipped when none is reachable (CI, headless). */
+    /**
+     * Talks to a real Secret Service, so it runs in CI only (design.md section 12): never against the
+     * keyring of the machine running the tests. Locally it is skipped and listed as such.
+     */
     @Test
     fun secretServiceRoundTrip() {
+        assumeTrue("keyring integration runs in CI only (design.md section 12)", System.getenv("CI") == "true")
         val detected = SecretServiceKeyring.detect(service = "cz.tadeasf.clipvault.test")
         assumeTrue("no Secret Service on this machine", detected != null)
         val keyring = checkNotNull(detected)
