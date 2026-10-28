@@ -30,6 +30,7 @@ suspend fun runDaemon(core: AgentCore, copyq: CopyQ, paths: AgentPaths, gnome: G
     launch {
         while (isActive) {
             host?.startIfReady() // `pair` may have enabled sync and paired a device meanwhile
+            host?.refreshConfig()
             core.flushOutbox()
             core.applyRetention()
             delay(HOUSEKEEPING_MILLIS)

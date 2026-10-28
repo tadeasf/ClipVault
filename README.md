@@ -17,6 +17,21 @@ telemetry. Design: [docs/design.md](docs/design.md). Versions: [docs/versions.md
 
 The two flavors install side by side and will be separate F-Droid listings.
 
+## Sync on Android (`sync` flavor)
+
+Settings -> Sync: turn it on, then "Pair a device".
+- **With a desktop:** run `clipvault-agent pair` and scan the QR code from the terminal, or run
+  `clipvault-agent pair --join` and pick "Show code" on the phone. Both devices show six words;
+  confirm on both.
+- **While it runs:** a quiet notification holds the connection while the screen is on and for 5
+  minutes after the last clip. Otherwise the phone catches up every 15 minutes in the background.
+- **Opt-ins:** sensitive categories you opt into arrive from other devices, hidden, and expire like
+  local sensitive clips. Off by default.
+- **Wi-Fi allowlist (off by default):** sync only on the networks you list. Android only tells apps
+  the network name with location permission, which is asked when you turn it on.
+- **Permissions:** local network access (Android 17+, asked when you turn sync on), camera (for
+  scanning) and location (for the allowlist), each only when used.
+
 ## Desktop: `clipvault-agent` with CopyQ
 
 On Linux, [CopyQ](https://hluk.github.io/CopyQ/) is the clipboard manager you see and use.
@@ -48,6 +63,11 @@ clipvault-agent status
 - **Sync status:** `clipvault-agent status` shows a line per paired device (state, last seen,
   cursor, frames, last error). `clipvault-agent peers` lists them, and `clipvault-agent unpair
   NAME|ID` unpairs one (over a live connection the other side is told at once).
+- **Sync settings:** `clipvault-agent config name NAME` sets the name peers show for this device
+  (`name default` goes back to the hostname). `clipvault-agent config sync_sensitive OTP,IBAN`
+  accepts those sensitive categories from peers (`password`, `otp`, `card_number`, `iban`, `api_key`,
+  `private_key`, `credentials_pair`, `ssn_like_id`; `none`, the default, accepts none). The running
+  agent picks up a change within 5 s and reconnects, so peers see it at once.
 - **No keyring:** `CLIPVAULT_KEYRING=none` makes the agent use the passphrase-protected key file
   and never contact a Secret Service. That needs a terminal for the passphrase.
 - **Lost keyring:** if the store's key is gone (for example, the keyring was replaced), the
