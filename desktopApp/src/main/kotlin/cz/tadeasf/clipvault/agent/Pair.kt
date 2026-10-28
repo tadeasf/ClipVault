@@ -135,7 +135,12 @@ class PairCommand(
     // --- initiator: join by code ---
 
     private fun join(addr: String?, listen: InetAddress?, name: String): Int {
-        val target = addr?.let(::parseHostPort) ?: discover(listen) ?: return fail("No device is showing a pairing code.")
+        val target = addr?.let(::parseHostPort) ?: discover(listen) ?: return fail(
+            "No device showing a pairing code was found on the local network (mDNS, 10 s).\n" +
+                "If the other desktop does show a code, mDNS is probably blocked (firewall, UDP 5353): run\n" +
+                "  clipvault-agent pair --join --addr HOST:PORT\n" +
+                "with the address printed under the code.",
+        )
         out.print("Pairing code shown on the other device: ")
         out.flush()
         val code = input.readLine()?.trim().orEmpty()

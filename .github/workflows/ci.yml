@@ -62,8 +62,18 @@ jobs:
       - name: Package desktop agent
         run: |
           sudo apt-get install -y --no-install-recommends fakeroot rpm
-          ./gradlew :desktopApp:packageRpm
           scripts/package-linux.sh
+
+      # The .rpm on a clean Fedora: install, then run the CLI from PATH as a normal user, with /opt on PATH
+      # after /usr/bin (a real user's setup that once resolved the /opt/clipvault-agent directory instead).
+      - name: Smoke-test the .rpm in Fedora
+        run: |
+          docker run --rm -v "$PWD/desktopApp/build/compose/binaries/main/rpm:/pkg:ro" fedora:44 bash -euc '
+            dnf install -y -q --setopt=install_weak_deps=False util-linux /pkg/*.rpm
+            useradd -m tester
+            su - tester -c "PATH=/usr/local/bin:/usr/bin:/opt; command -v clipvault-agent; readlink -f \$(command -v clipvault-agent); clipvault-agent --help | head -3"
+            su - tester -c "XDG_RUNTIME_DIR=\$(mktemp -d) clipvault-agent status --dry-run"
+          '
 
       - name: Upload desktop packages
         uses: actions/upload-artifact@v7

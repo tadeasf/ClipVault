@@ -31,8 +31,9 @@ compose.desktop {
         mainClass = "cz.tadeasf.clipvault.agent.MainKt"
 
         nativeDistributions {
-            // AppImage = jpackage app-image directory; CI wraps it with appimagetool.
-            targetFormats(TargetFormat.Rpm, TargetFormat.Deb, TargetFormat.AppImage)
+            // AppImage = jpackage app-image directory; scripts/package-linux.sh builds the .rpm from it with rpmbuild
+            // (to put the CLI on PATH), patches jpackage's .deb, and wraps the AppImage.
+            targetFormats(TargetFormat.Deb, TargetFormat.AppImage)
             packageName = "clipvault-agent"
             packageVersion = "0.4.0"
             description = "ClipVault agent: encrypted clipboard history with CopyQ as the desktop front end"
