@@ -1,5 +1,11 @@
 package cz.tadeasf.clipvault.sync.crypto
 
+import cz.tadeasf.clipvault.sync.secure.HandshakeMode
+import cz.tadeasf.clipvault.sync.secure.Initiator
+import cz.tadeasf.clipvault.sync.secure.LocalIdentity
+import cz.tadeasf.clipvault.sync.secure.Responder
+import cz.tadeasf.clipvault.sync.pairing.deviceIdOf
+import cz.tadeasf.clipvault.sync.pairing.fingerprintWords
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -137,6 +143,49 @@ class HandshakeVectorsTest {
         val h3 = vectors.obj("modes").obj("pair_qr").hex("h3")
         val signed = lp("clipvault-id-v1") + lp(h3) + lp(identity.hex("name"))
         assertContentEquals(identity.hex("sig"), c.ed25519Sign(input("id_a_seed"), signed))
+    }
+
+    /** The production state machines, fed the fixed inputs, must emit exactly the reference bytes. */
+    @Test
+    fun stateMachinesReproduceTheReference() {
+        val idA = LocalIdentity(input("id_a_seed"), c)
+        val idB = LocalIdentity(input("id_b_seed"), c)
+        for ((name, expected) in vectors.obj("modes")) {
+            val v = expected.jsonObject
+            val mode = HandshakeMode.of(v.getValue("mode").jsonPrimitive.int.toByte())!!
+            val binding = v.hex("binding")
+            val a = Initiator(c, mode, binding, idA, listOf(idB.publicKey), input("eph_a"), input("nonce_a"))
+            val b = Responder(c, idB, listOf(idA.publicKey), { if (it == mode) binding else null }, input("eph_b"), input("nonce_b"))
+            val init = a.init()
+            assertContentEquals(v.hex("init"), init, "$name init")
+            val resp = b.onInit(init)
+            assertContentEquals(v.hex("resp"), resp, "$name resp")
+            val (fin, keysA) = a.onResp(resp)
+            assertContentEquals(v.hex("fin"), fin, "$name fin")
+            val keysB = b.onFin(fin)
+            assertContentEquals(v.hex("k_ab"), keysA.sendKey, "$name A sends with k_ab")
+            assertContentEquals(v.hex("k_ba"), keysA.receiveKey)
+            assertContentEquals(v.hex("k_ba"), keysB.sendKey, "$name B sends with k_ba")
+            assertContentEquals(v.hex("k_ab"), keysB.receiveKey)
+            assertContentEquals(v.hex("h3"), keysA.h3, "$name h3 (A)")
+            assertContentEquals(v.hex("h3"), keysB.h3, "$name h3 (B)")
+            if (mode == HandshakeMode.SESSION) {
+                assertContentEquals(idB.publicKey, keysA.peer)
+                assertContentEquals(idA.publicKey, keysB.peer)
+            } else {
+                assertNull(keysA.peer)
+                assertNull(keysB.peer)
+            }
+        }
+    }
+
+    @Test
+    fun productionHelpersMatchTheReference() {
+        val (idA, idB) = input("id_a_pub") to input("id_b_pub")
+        val fp = vectors.obj("fingerprint")
+        assertEquals(fp.getValue("words").jsonArray.map { it.jsonPrimitive.content }, fingerprintWords(c, idA, idB))
+        assertEquals(fingerprintWords(c, idA, idB), fingerprintWords(c, idB, idA), "the same words on both devices")
+        assertEquals(vectors.obj("device_id").getValue("a").jsonPrimitive.content, deviceIdOf(c, idA))
     }
 
     private fun UByteArray.compareWith(other: UByteArray): Int {

@@ -5,7 +5,6 @@ import cz.tadeasf.clipvault.sync.wire.Ack
 import cz.tadeasf.clipvault.sync.wire.Bye
 import cz.tadeasf.clipvault.sync.wire.CatchUpBatch
 import cz.tadeasf.clipvault.sync.wire.CatchUpRequest
-import cz.tadeasf.clipvault.sync.wire.Decoded
 import cz.tadeasf.clipvault.sync.wire.FetchPayload
 import cz.tadeasf.clipvault.sync.wire.Hello
 import cz.tadeasf.clipvault.sync.wire.Message
@@ -13,22 +12,22 @@ import cz.tadeasf.clipvault.sync.wire.Payload
 import cz.tadeasf.clipvault.sync.wire.Push
 import cz.tadeasf.clipvault.sync.wire.SyncEvent
 import cz.tadeasf.clipvault.sync.wire.WireCodec
-import kotlinx.serialization.SerializationException
 
 /**
  * One connection to one peer (protocol.md section 11). Symmetric: both sides send Hello, then each
  * pulls the other's log page by page, and once a side has served the last page it pushes new events.
  */
-class SyncSession internal constructor(private val node: SyncNode, private val transmit: (ByteArray) -> Unit) {
+class SyncSession internal constructor(
+    private val node: SyncNode,
+    private val transmit: (Message) -> Unit,
+    private val expectedPeerDeviceId: String?,
+) {
     var peer: Hello? = null
         private set
     var closed = false
         private set
     var closeReason: String? = null
         private set
-
-    private var sentSeq = 0L
-    private var receivedSeq = 0L
 
     /** Sender side: the peer has caught up with us; new events go out as Push from [pushedThrough]. */
     private var live = false
@@ -40,20 +39,9 @@ class SyncSession internal constructor(private val node: SyncNode, private val t
 
     internal fun start() = node.config.let { send(Hello(it.deviceId, it.sensitiveOptIn.names(), it.maxPayloadBytes)) }
 
-    fun receive(bytes: ByteArray) {
-        if (closed) return
-        val decoded = try {
-            WireCodec.decode(bytes)
-        } catch (e: SerializationException) {
-            return close("malformed message: ${e.message}")
-        }
-        if (decoded.seq <= receivedSeq) return close("envelope seq ${decoded.seq} after $receivedSeq")
-        receivedSeq = decoded.seq
-        when (decoded) {
-            is Decoded.Refused -> close("unsupported major ${decoded.major}")
-            is Decoded.Ignored -> Unit
-            is Decoded.Ok -> handle(decoded.message)
-        }
+    /** One decoded message from the peer; envelope numbering and versions are the transport's job. */
+    fun receive(message: Message) {
+        if (!closed) handle(message)
     }
 
     /** Asks the peer for an over-cap clip's content. */
@@ -96,11 +84,14 @@ class SyncSession internal constructor(private val node: SyncNode, private val t
             }
             is FetchPayload -> send(Payload(message.clipId, node.log.payload(message.clipId, peer)))
             is Payload -> message.bytes?.let { node.applier.fillPayload(message.clipId, it) }
-            else -> Unit // Ack: informational in v1.0
+            else -> Unit // Ack is informational; pairing and revoke messages belong to the secure connection
         }
     }
 
     private fun hello(message: Hello) {
+        if (expectedPeerDeviceId != null && message.deviceId != expectedPeerDeviceId) {
+            return close("device id ${message.deviceId} does not match the authenticated identity")
+        }
         peer = message
         val (cursor, optInsThen) = node.cursor(message.deviceId)
         rescan = (node.config.sensitiveOptIn - optInsThen).ifEmpty { null }
@@ -139,6 +130,6 @@ class SyncSession internal constructor(private val node: SyncNode, private val t
     }
 
     private fun send(message: Message) {
-        if (!closed) transmit(WireCodec.encode(message, ++sentSeq))
+        if (!closed) transmit(message)
     }
 }

@@ -4,6 +4,7 @@ import cz.tadeasf.clipvault.db.ClipDatabase
 import cz.tadeasf.clipvault.detect.SensitiveCategory
 import cz.tadeasf.clipvault.sync.db.SyncDatabase
 import cz.tadeasf.clipvault.sync.wire.DEFAULT_MAX_PAYLOAD
+import cz.tadeasf.clipvault.sync.wire.Message
 
 /** Per-device sync settings. [sensitiveOptIn] is what this device accepts from peers; it is sent in Hello. */
 data class SyncConfig(
@@ -19,8 +20,9 @@ data class SyncConfig(
 
 /**
  * One device's side of sync: its log, its applier and its open sessions. Transport-agnostic: a session
- * gets bytes from [SyncSession.receive] and hands bytes to the transmit function it was opened with.
- * Not thread-safe; step 7 drives each node from one coroutine.
+ * gets messages from [SyncSession.receive] and hands messages to the transmit function it was opened
+ * with; the secure connection (or a test bus) does the envelope encoding.
+ * Not thread-safe; step 7 drives each node from one single-threaded dispatcher.
  */
 class SyncNode(db: ClipDatabase, private val syncDb: SyncDatabase, config: SyncConfig) {
     /** A change (e.g. a new opt-in) takes effect at the next connect. */
@@ -30,8 +32,12 @@ class SyncNode(db: ClipDatabase, private val syncDb: SyncDatabase, config: SyncC
     val applier = SyncApplier(db, syncDb)
     private val sessions = mutableListOf<SyncSession>()
 
-    /** Opens a session over a fresh connection and sends Hello. */
-    fun connect(transmit: (ByteArray) -> Unit): SyncSession = SyncSession(this, transmit).also {
+    /**
+     * Opens a session over a fresh connection and sends Hello. [expectedPeerDeviceId]: the id the
+     * authenticated identity must claim (design.md 5.3.1); null only on the unauthenticated test bus.
+     */
+    fun connect(expectedPeerDeviceId: String? = null, transmit: (Message) -> Unit): SyncSession =
+        SyncSession(this, transmit, expectedPeerDeviceId).also {
         sessions += it
         it.start()
     }

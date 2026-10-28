@@ -153,3 +153,7 @@ keepNewest:
 DELETE FROM Clip WHERE pinned = 0 AND id NOT IN (
   SELECT id FROM Clip WHERE pinned = 0 ORDER BY createdAt DESC LIMIT ?
 );
+
+-- design.md 5.3.1: enableSync relabels this device's own rows to the identity-derived id (nothing synced yet).
+relabelDevice:
+UPDATE Clip SET deviceId = :new WHERE deviceId = :old;

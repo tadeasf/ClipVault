@@ -10,7 +10,9 @@ import cz.tadeasf.clipvault.storage.JvmDriverFactory
 import cz.tadeasf.clipvault.storage.clipDatabase
 import cz.tadeasf.clipvault.sync.db.SyncDatabase
 import cz.tadeasf.clipvault.sync.wire.Hello
+import cz.tadeasf.clipvault.sync.wire.Decoded
 import cz.tadeasf.clipvault.sync.wire.SyncEvent
+import cz.tadeasf.clipvault.sync.wire.WireCodec
 import java.io.File
 import java.nio.file.Files
 import kotlin.random.Random
@@ -76,15 +78,18 @@ class Net(vararg ids: String, configure: (String) -> SyncConfig = { SyncConfig(i
 
     operator fun get(id: String) = devices.getValue(id)
 
+    /** An unencrypted connection: envelopes over two FIFO queues (the secure one is SecureHarness). */
     inner class Link(val a: Device, val b: Device) {
         val toA = ArrayDeque<ByteArray>()
         val toB = ArrayDeque<ByteArray>()
-        val atA: SyncSession = a.node.connect { toB.addLast(it) }
-        val atB: SyncSession = b.node.connect { toA.addLast(it) }
+        private var seqToA = 0L
+        private var seqToB = 0L
+        val atA: SyncSession = a.node.connect { toB.addLast(WireCodec.encode(it, ++seqToB)) }
+        val atB: SyncSession = b.node.connect { toA.addLast(WireCodec.encode(it, ++seqToA)) }
 
         fun deliverOne(towardsA: Boolean) {
             val (queue, session) = if (towardsA) toA to atA else toB to atB
-            session.receive(queue.removeFirst())
+            session.receive((WireCodec.decode(queue.removeFirst()) as Decoded.Ok).message)
             listOf(atA, atB).forEach { s -> s.closeReason?.let { fail("${a.id}-${b.id} closed: $it") } }
         }
     }

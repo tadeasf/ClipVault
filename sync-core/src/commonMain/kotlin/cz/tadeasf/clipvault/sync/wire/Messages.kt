@@ -87,5 +87,20 @@ class Payload(val clipId: String, val bytes: ByteArray?) : Message
 @SerialName("bye")
 data class Bye(val reason: String) : Message
 
+/** pairing.md section 3: proves possession of [idPub] and ties it to this session's h3. */
+@Serializable
+@SerialName("identity")
+class Identity(val idPub: ByteArray, val name: String, val sig: ByteArray) : Message
+
+/** pairing.md section 1.4: this side's user confirmed the fingerprint words. */
+@Serializable
+@SerialName("pair_confirm")
+data object PairConfirm : Message
+
+/** pairing.md section 4: the sender unpaired us. */
+@Serializable
+@SerialName("revoke")
+data object Revoke : Message
+
 /** Design 5.5. */
 const val DEFAULT_MAX_PAYLOAD = 1024L * 1024
