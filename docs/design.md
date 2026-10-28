@@ -333,8 +333,9 @@ Also:
   - **Limitation:** Kover only measures host-JVM tests, not instrumented ones. Android-only classes
     (`KeystoreDbKeyProvider`, `AndroidDriverFactory`) therefore show 0% even though device tests
     cover them.
-  - **Rule:** `koverVerify` enforces 80% line coverage on everything except SQLDelight-generated
-    code.
+  - **Rule:** `koverVerifyJvm` (the gate CI runs) enforces 80% line coverage on common + jvm code,
+    excluding SQLDelight-generated code. The merged `koverVerify` also counts Android-only
+    classes at 0% and is therefore not the gate.
 - **Android tests are instrumented, not Robolectric:** SQLCipher's native library is built for
   Android ABIs and cannot load on a host JVM, and Robolectric has no AndroidKeyStore provider.
   `withDeviceTestBuilder { sourceSetTreeName = "test" }` makes `commonTest` part of the device

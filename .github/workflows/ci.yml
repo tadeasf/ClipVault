@@ -20,10 +20,11 @@ jobs:
       - name: Verify vault flavor is offline
         run: ./gradlew :androidApp:verifyVaultDebugOffline :androidApp:verifyVaultReleaseOffline
 
-      # jvm only: Android repository/keystore tests are instrumented (connectedAndroidDeviceTest).
+      # Coverage gate on the jvm variant (common + jvm code). Android-only classes are covered by
+      # instrumented tests (connectedAndroidDeviceTest), which Kover cannot measure.
       # The Secret Service test skips itself on runners without a keyring.
       - name: Tests and coverage gate
-        run: ./gradlew :shared:allTests :sync-core:allTests :shared:koverVerify :shared:koverHtmlReport
+        run: ./gradlew :shared:allTests :sync-core:allTests :shared:koverVerifyJvm :shared:koverHtmlReport
 
       - name: Upload coverage report
         if: always()
