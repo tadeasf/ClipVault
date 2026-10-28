@@ -274,3 +274,54 @@ visible states are equal.
 - No partial or streamed payloads: `payload` carries the whole clip.
 - No re-scan for categories after an opt-out followed by another opt-in within one session. The
   next connect handles it.
+
+## 15. Running a node (step 7, protocol 1.2)
+
+`SyncNode` runs one device. It joins this protocol with the secure channel (handshake.md) and
+discovery.
+
+**One serial dispatcher:**
+- All handshakes, applies and sends of a node run on one serial dispatcher, one task at a time.
+- Socket reads and writes suspend onto I/O threads.
+- Local writes enter through `SyncNode.write { }`, so they never interleave with applies.
+  `SyncNodeTest` checks this with 16 coroutines.
+
+**Connect policy:**
+- The node dials every paired peer that isn't connected. Candidates are mDNS results (a random
+  instance name, design 5.4) plus the peer's last-known address, refreshed on each attempt. It
+  accepts paired peers inbound.
+- **Simultaneous connects:** if two connections to the same peer are both established, the one
+  whose initiator has the lexically smaller device id survives. Both sides compute the same answer,
+  and the loser gets `Bye("duplicate connection")`.
+- **Backoff per peer:** 1 s doubling to 5 min, ±20 % jitter, reset once a connection is
+  established.
+- **Ends that are not failures:** a round in which the peer connected and then ended (session
+  limit, settings change, duplicate) reconnects without backoff.
+
+**Session:**
+- Hello carries the opt-ins and, from 1.2, `syncEnabledAt` (informational).
+- CatchUpRequest starts from the stored cursor; batches follow until `hasMore = false`; then
+  live Push/Ack.
+- The receiver advances its cursor only after an apply is durable, together with the Ack. A
+  reconnect resumes exactly there (`SyncNodeTest`: killed at cursor 50, 50 events after restart).
+- A settings change reconnects. A session records the opt-ins it announced, so a gain triggers
+  the `onlySensitive` re-scan on the next session.
+
+**Heartbeat (1.2, `ping`/`pong`):**
+- A Ping after 30 s without sending.
+- 90 s without receiving anything closes the session (3 missed), and the node reconnects with
+  backoff.
+
+**Session limits:** when a session is 60 s short of 24 h, or 16 frames short of 2^32, it ends with
+Bye and reconnects (handshake.md section 5).
+
+**Payloads:**
+- Nothing over 1 MiB is ever sent (inline or fetched) or accepted. Inline payloads also respect the
+  peer's `maxPayloadBytes`.
+- `FetchPayload` runs on demand, at most 2 per peer at a time; the rest wait in a queue.
+
+**Observability:**
+- Per peer: state (discovering / connecting / handshake / catching-up / live / backoff), last
+  seen, cursor, backoff until, frames in/out, last error class.
+- Logs carry no clip content, no keys and no transcript hashes.
+

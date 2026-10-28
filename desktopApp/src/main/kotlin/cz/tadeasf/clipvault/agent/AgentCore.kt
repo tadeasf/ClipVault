@@ -31,7 +31,7 @@ data class Flush(val written: Int, val skipped: Int, val backlog: Int, val copyq
  * commands use it directly when no daemon answers.
  */
 class AgentCore(
-    db: ClipDatabase,
+    val db: ClipDatabase,
     private val copyq: CopyQ,
     private val now: () -> Long = System::currentTimeMillis,
     io: CoroutineContext = Dispatchers.IO,

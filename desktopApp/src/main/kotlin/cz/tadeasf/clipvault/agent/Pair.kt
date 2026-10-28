@@ -26,7 +26,6 @@ import java.io.PrintStream
 import java.net.Inet6Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
-import java.net.NetworkInterface
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketTimeoutException
@@ -86,7 +85,7 @@ class PairCommand(
     // --- responder: QR or code ---
 
     private fun show(byCode: Boolean, listen: InetAddress?, name: String): Int {
-        val addresses = listen?.let(::listOf) ?: siteLocalAddresses()
+        val addresses = listen?.let(::listOf) ?: siteLocalAddresses().map(InetAddress::getByName)
         if (addresses.isEmpty()) return fail("No site-local network address to listen on (use --listen ADDR).")
         val ctx = setup(name)
         val servers = bind(addresses)
@@ -152,7 +151,7 @@ class PairCommand(
     }
 
     private fun discover(listen: InetAddress?): InetSocketAddress? {
-        val addresses = listen?.let(::listOf) ?: siteLocalAddresses()
+        val addresses = listen?.let(::listOf) ?: siteLocalAddresses().map(InetAddress::getByName)
         out.println("Looking for devices showing a pairing code...")
         val found = addresses.flatMap { address ->
             JmDNS.create(address, "clipvault-join").use { mdns ->
@@ -226,12 +225,6 @@ class PairCommand(
         return listOf(first) + addresses.drop(1).mapNotNull { runCatching { ServerSocket(first.localPort, 8, it) }.getOrNull() }
     }
 
-    /** Design 5.4: only site-local addresses of interfaces that are up; never 0.0.0.0. */
-    private fun siteLocalAddresses(): List<InetAddress> = NetworkInterface.getNetworkInterfaces().toList()
-        .filter { it.isUp && !it.isLoopback && !it.isVirtual }
-        .flatMap { it.inetAddresses.toList() }
-        .filter { it.isSiteLocalAddress || (it is Inet6Address && (it.address[0].toInt() and 0xfe) == 0xfc) }
-
     private fun advertise(addresses: List<InetAddress>, port: Int): List<JmDNS> = addresses.mapNotNull { address ->
         runCatching {
             JmDNS.create(address, "clipvault-pair").apply {
@@ -250,9 +243,6 @@ class PairCommand(
 
     private fun hostPort(address: InetAddress, port: Int) =
         if (address is Inet6Address) "[${address.hostAddress}]:$port" else "${address.hostAddress}:$port"
-
-    private fun hostname(): String =
-        System.getenv("HOSTNAME")?.takeIf(String::isNotBlank) ?: runCatching { File("/etc/hostname").readText().trim() }.getOrNull() ?: "desktop"
 
     private fun List<String>.valueAfter(flag: String) = indexOf(flag).takeIf { it >= 0 }?.let { getOrNull(it + 1) }
 
