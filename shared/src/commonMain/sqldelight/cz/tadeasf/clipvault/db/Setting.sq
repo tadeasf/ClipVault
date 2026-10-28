@@ -1,0 +1,14 @@
+-- App settings as key/value text, inside the encrypted database so they share its protection.
+CREATE TABLE Setting (
+  key TEXT NOT NULL PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+all:
+SELECT key, value FROM Setting;
+
+get:
+SELECT value FROM Setting WHERE key = ?;
+
+put:
+INSERT OR REPLACE INTO Setting(key, value) VALUES (?, ?);

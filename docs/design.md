@@ -458,3 +458,107 @@ lines, at least 40% of them code-like) -> PLAIN.
 - **URL cleanup:** drops `utm_*`, `fbclid`, `gclid`, `igshid` and `si` from every URL in the text.
 - **JSON:** pretty-print and minify. Invalid JSON fails soft, as `Result.failure`.
 - **Base64:** encode and decode. Decode only succeeds when the result is printable UTF-8.
+
+## 10. Android app (step 3)
+
+### 10.1 Capture paths
+
+All paths go through `ClipIngest`; there is no foreground service. "Background" below means
+another app is in front.
+
+| Path | Component | Exported | Reads the clipboard | Source app known |
+|---|---|---|---|---|
+| Quick Settings tile | `CaptureTileService` -> `CaptureActivity` | tile service only (needs BIND_QUICK_SETTINGS_TILE) | yes, once focused | no |
+| Notification action | `CaptureNotification` (opt-in, low importance, not a FGS) -> `CaptureActivity` | no | yes | no |
+| Share sheet | `ShareActivity` (`ACTION_SEND text/plain`) | yes | no, text comes in the intent | no |
+| Text selection | `ShareActivity` (`ACTION_PROCESS_TEXT`) | yes | no | no |
+| Accessibility (opt-in) | `ClipAccessibilityService` -> `CaptureActivity` | no (bound by the system) | yes | yes, last foreground app |
+
+- **`CaptureActivity` is not exported.** Only our tile, notification and Accessibility service can
+  start it, so no other app can make ClipVault read the clipboard or fake a source package.
+- **How it reads:** it is an invisible activity that reads in `onWindowFocusChanged(true)`. It
+  gives up after 2 s without focus ("open ClipVault and try again"), so it never sits invisibly
+  over another app swallowing touches.
+- **Outcomes it reports:** empty clipboard, non-text clip, denied (no focus), duplicate, sensitive
+  source and excluded app each get their own feedback text (`CaptureFeedback`).
+- **Housekeeping after a stored clip:** retention runs after every capture and on app resume. A
+  sensitive clip also schedules an inexact `AlarmManager` sweep. WorkManager would have been
+  simpler, but it declares `ACCESS_NETWORK_STATE`, which the vault flavor's guard rejects.
+
+### 10.2 Accessibility auto-capture: events and measured reliability
+
+- **Configuration:** `canRetrieveWindowContent="false"`, `isAccessibilityTool="false"`. The
+  service sees event text and labels only, never window content.
+- **Events hooked** (`CopySignal`):
+  - `TYPE_VIEW_CLICKED` on a "Copy"/"Kopírovat"/"Copy link" button.
+  - `TYPE_NOTIFICATION_STATE_CHANGED`, `TYPE_ANNOUNCEMENT` and `TYPE_WINDOW_STATE_CHANGED` whose
+    text says "copied"/"zkopírováno", ignoring our own package.
+  - `TYPE_WINDOW_STATE_CHANGED` from real apps is also used to remember the source package.
+- **Debounce and delay:** 1 s debounce, then `CaptureActivity` starts 150 ms later.
+- **Which signal fired:** on the Samsung SM-S916B (One UI, Android 16) every capture was triggered
+  by One UI's own "Copied" confirmation (`TYPE_NOTIFICATION_STATE_CHANGED` from
+  `com.android.systemui`). It shows up for any app's copy, so detection does not depend on how
+  each app labels its Copy button.
+
+| App | Copies performed | Captured | Source package correct | Notes |
+|---|---|---|---|---|
+| Chrome | 9 (+1 failed automation tap) | 9 | 9 | Copied by long-press, then the toolbar's Copy |
+| Firefox | 10 | 10 | 10 | |
+| Firefox, excluded in settings | 2 | 0 stored, 2 skipped as `EXCLUDED_SOURCE` | 2 | |
+| Messenger (Signal/WhatsApp/Telegram) | not run | | | needs the user's own chats, see below |
+| Notes app | not run | | | no notes app installed |
+
+- **The one Chrome miss was the test script, not ClipVault.** The scripted tap hit "Select all"
+  instead of "Copy", so nothing was copied, and the service correctly saw no copy event.
+- **Messenger and notes runs need the owner.** They require driving and dumping the owner's
+  private chats, so they are left to them, with the debug log below.
+- **Observed caveats:**
+  - **Force-stop:** force-stopping ClipVault (Settings > Apps > Force stop) makes One UI remove it
+    from `enabled_accessibility_services`. Auto-capture then stays off until the user re-enables
+    it; settings show "off".
+  - **Screen off:** with the screen off or dozing, `CaptureActivity` cannot get focus and reports
+    "open ClipVault and try again". It never fails silently.
+  - **Paste toast:** Android 12+ shows "ClipVault pasted from your clipboard" on every
+    Accessibility capture, as the settings screen warns.
+- **Measuring on a device:** `adb logcat -s ClipVaultA11y:I ClipVaultCapture:I`. Debug builds only;
+  the log has the event type and package names, never clip content.
+
+### 10.3 UI and state
+
+- **Placement:** screens and ViewModels live in `:ui` (common). Each ViewModel exposes
+  `StateFlow<sealed State>`: `HistoryState`, `DetailState` and `SettingsState`.
+- **Platform glue:** `AndroidAppPlatform` provides clipboard writes (marking sensitive clips with
+  `EXTRA_IS_SENSITIVE`), share, Accessibility status, `requestAddTileService` and the launchable
+  apps for the exclusion picker. It uses a `<queries>` launcher intent, not QUERY_ALL_PACKAGES.
+- **Settings** live in the encrypted database (`Setting` table, migration `3.sqm`), loaded once
+  per process. On device: retention count, TTL, theme, capture notification and exclusions all
+  survived a force-stop.
+- **Bugs found on device and fixed:**
+  - The history list kept its scroll anchor, so clips captured in the background landed above the
+    viewport. It now scrolls to the top on resume.
+  - Theme and exclusion rows were only tappable on the small radio/checkbox. Whole rows are now
+    `selectable`/`toggleable` with proper roles.
+  - In the Light theme the status-bar icons were white on white. System bars now follow the app
+    theme.
+  - A class named `cz.tadeasf.clipvault.AndroidPlatform` existed in both `:shared` (the wizard
+    sample) and `:androidApp`. Dex merging kept the wrong one, causing a `NoSuchMethodError`. The
+    app's class is now `AndroidAppPlatform`.
+
+### 10.4 Open: CopyQ as the desktop front end (raised 2026-10-28)
+
+The idea: keep CopyQ on the desktop and use ClipVault on the phone, with history synced between
+them. It is feasible with CopyQ 17's CLI: `add`, `insert`, `read`, `write`, `remove`, `count`
+and `tab`, plus its scripting.
+
+- **Desktop to phone:** needs no CopyQ access. ClipVault desktop already watches the same
+  clipboard through CopyQ's GNOME extension (6.3), so it can run as a headless sync agent instead
+  of a second history UI.
+- **Phone to desktop:** synced clips go into CopyQ via its CLI, into the history tab or a
+  dedicated "Phone" tab.
+- **Pins and deletes:** need a mapping between CopyQ rows and ClipVault ids. One-way at first is
+  simplest.
+- **Privacy cost:** CopyQ's tab files are unencrypted unless its tab encryption (GnuPG) is on, and
+  on the dev machine `encrypt_tabs=false`. Synced phone clips would therefore sit on disk in
+  plaintext, which breaks principle 3 for them. Sensitive clips would never be written to CopyQ.
+- **Effect on the plan:** step 4 shrinks to tray + settings + pairing + the sync agent, and the
+  CopyQ bridge joins step 7 or 8. Decision pending.

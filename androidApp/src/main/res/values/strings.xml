@@ -1,3 +1,7 @@
 <resources>
     <string name="app_name">ClipVault</string>
+    <string name="save_to_clipvault">Save to ClipVault</string>
+    <string name="accessibility_label">ClipVault automatic capture</string>
+    <string name="accessibility_summary">Captures what you copy without opening ClipVault.</string>
+    <string name="accessibility_description">ClipVault watches only for copy actions (a tap on a Copy button, or a "Copied" confirmation). It does not read screen content. When it sees one, it briefly opens an invisible window so Android lets it read the clipboard, and it notes which app you copied from so per-app exclusions work. Android 12 and later show a "ClipVault pasted from your clipboard" message each time. Everything stays encrypted on this device.</string>
 </resources>

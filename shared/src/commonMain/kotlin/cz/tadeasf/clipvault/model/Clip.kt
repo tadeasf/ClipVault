@@ -19,6 +19,8 @@ data class Clip(
     val lamportClock: Long,
     val seq: Long,
     val categories: Set<SensitiveCategory>,
+    /** Package of the copying app; only known on the Accessibility capture path. */
+    val sourcePackage: String?,
 )
 
 /** Platform signals that come with a captured clip. All optional; capture paths fill what they know. */
@@ -33,6 +35,18 @@ data class ClipHints(
 
 /** What capture hands to the repository; type, sensitivity, id, hash, clock and seq are derived on insert. */
 data class ClipDraft(val content: String, val hints: ClipHints = ClipHints())
+
+/** What the history list shows. Blank [text] lists everything; [type] null means any content type. */
+data class ClipFilter(
+    val text: String = "",
+    val type: ContentType? = null,
+    val pinnedOnly: Boolean = false,
+    val includeSensitive: Boolean = false,
+)
+
+data class InsertResult(val id: String, val duplicate: Boolean, val sensitive: Boolean)
+
+data class ClipCounts(val total: Long, val sensitive: Long)
 
 data class RetentionPolicy(
     val maxCount: Long? = null,

@@ -60,7 +60,7 @@ class MigrationTest {
             assertEquals(listOf("clip-a"), repo.search("hub").map { it.id }) // trigram index rebuilt
             assertEquals(listOf("clip-b"), repo.search("namesti").map { it.id })
             assertEquals(listOf("clip-b"), repo.search("Vá").map { it.id }) // prefix index rebuilt
-            assertEquals(7L, repo.get(repo.insert(ClipDraft("after migration")))?.seq)
+            assertEquals(7L, repo.get(repo.insert(ClipDraft("after migration")).id)?.seq)
         } finally {
             driver.close()
         }

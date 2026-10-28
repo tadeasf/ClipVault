@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Events only; canRetrieveWindowContent="false" means the service cannot read what is on screen.
+     Copy signals: clicks on a "Copy" button, and "Copied" toasts/announcements (CopySignal.kt).
+     Window-state changes are used only to remember which app is in front. -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeViewClicked|typeWindowStateChanged|typeNotificationStateChanged|typeAnnouncement"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:canRetrieveWindowContent="false"
+    android:description="@string/accessibility_description"
+    android:isAccessibilityTool="false"
+    android:notificationTimeout="100"
+    android:summary="@string/accessibility_summary" />
