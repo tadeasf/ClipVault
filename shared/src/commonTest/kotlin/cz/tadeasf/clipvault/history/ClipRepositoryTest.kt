@@ -3,6 +3,8 @@ package cz.tadeasf.clipvault.history
 import androidx.paging.PagingSource
 import cz.tadeasf.clipvault.model.Clip
 import cz.tadeasf.clipvault.model.ClipDraft
+import cz.tadeasf.clipvault.model.ClipHints
+import cz.tadeasf.clipvault.model.ContentType
 import cz.tadeasf.clipvault.model.RetentionPolicy
 import cz.tadeasf.clipvault.security.sha256Hex
 import cz.tadeasf.clipvault.storage.clipDatabase
@@ -65,12 +67,13 @@ class ClipRepositoryTest {
     @Test
     fun searchMatchesPrefixesAndHidesSensitiveAndDeleted() = runTest {
         repo.insert(ClipDraft("kotlin multiplatform"))
-        repo.insert(ClipDraft("kotlin secret", sensitive = true))
+        repo.insert(ClipDraft("kotlin secret", ClipHints(sourcePackage = "com.x8bit.bitwarden")))
         val gone = repo.insert(ClipDraft("kotlin deleted"))
         repo.delete(gone)
         repo.insert(ClipDraft("unrelated"))
 
         assertEquals(listOf("kotlin multiplatform"), repo.search("kot multi").map { it.content })
+        assertEquals(listOf("kotlin multiplatform"), repo.search("platform").map { it.content })
         assertEquals(setOf("kotlin multiplatform", "kotlin secret"), repo.search("kotlin", includeSensitive = true).map { it.content }.toSet())
         assertEquals(listOf("kotlin multiplatform"), list("kotlin").map { it.content })
     }
@@ -87,7 +90,7 @@ class ClipRepositoryTest {
     @Test
     fun listHidesSensitiveUnlessAsked() = runTest {
         repo.insert(ClipDraft("plain"))
-        repo.insert(ClipDraft("otp 123456", sensitive = true))
+        repo.insert(ClipDraft("Váš ověřovací kód je 123456"))
         assertEquals(listOf("plain"), list().map { it.content })
         assertEquals(2, list(includeSensitive = true).size)
     }
@@ -132,6 +135,62 @@ class ClipRepositoryTest {
         val b = repo.insert(ClipDraft("b"))
         assertEquals(1L, repo.get(a)?.lamportClock)
         assertEquals(3L, repo.get(b)?.lamportClock)
+    }
+
+    @Test
+    fun clipsAndMetaEventsShareOneSeqCounter() = runTest {
+        val a = repo.insert(ClipDraft("a")) // seq 1
+        repo.setPinned(a, true) // seq 2 (MetaEvent)
+        val b = repo.insert(ClipDraft("b")) // seq 3
+        assertEquals(1L, repo.get(a)?.seq)
+        assertEquals(3L, repo.get(b)?.seq)
+        repo.insert(ClipDraft("a")) // re-copy: a moves to seq 4
+        assertEquals(4L, repo.get(a)?.seq)
+    }
+
+    @Test
+    fun trigramSearchFindsSubstringsAndFoldsDiacritics() = runTest {
+        repo.insert(ClipDraft("https://github.com/tadeasf/ClipVault"))
+        repo.insert(ClipDraft("Ověřovací kód pro přihlášení"))
+        assertEquals(1, repo.search("hub").size)
+        assertEquals(1, repo.search("ipvau").size)
+        assertEquals(1, repo.search("overovaci kod").size)
+        assertEquals(1, repo.search("PŘIHLÁŠENÍ").size)
+    }
+
+    @Test
+    fun shortTokensFallBackToWordPrefixSearch() = runTest {
+        repo.insert(ClipDraft("go build ./..."))
+        repo.insert(ClipDraft("cargo run"))
+        assertEquals(listOf("go build ./..."), repo.search("go").map { it.content })
+        assertEquals(listOf("go build ./..."), list("go bu").map { it.content })
+    }
+
+    @Test
+    fun insertDetectsContentTypeAndSensitivity() = runTest {
+        val url = assertNotNull(repo.get(repo.insert(ClipDraft("https://example.com/a?b=1"))))
+        assertEquals(ContentType.URL, url.contentType)
+        assertFalse(url.sensitive)
+        val card = assertNotNull(repo.get(repo.insert(ClipDraft("4111 1111 1111 1111"))))
+        assertTrue(card.sensitive)
+        val fromManager = repo.get(repo.insert(ClipDraft("hunter2", ClipHints(sourcePackage = "com.beemdevelopment.aegis"))))
+        assertTrue(assertNotNull(fromManager).sensitive)
+    }
+
+    @Test
+    fun sensitiveClipsExpireAfterTtlUnlessPinned() = runTest {
+        val otp = repo.insert(ClipDraft("483920"))
+        val pinnedOtp = repo.insert(ClipDraft("771204"))
+        repo.setPinned(pinnedOtp, true)
+        val plain = repo.insert(ClipDraft("shopping list"))
+        time += RetentionPolicy.DEFAULT_SENSITIVE_TTL_MILLIS - 1
+        repo.applyRetention(RetentionPolicy())
+        assertNotNull(repo.get(otp))
+        time += 2
+        repo.applyRetention(RetentionPolicy())
+        assertEquals(null, repo.get(otp))
+        assertNotNull(repo.get(pinnedOtp))
+        assertNotNull(repo.get(plain))
     }
 
     @Test

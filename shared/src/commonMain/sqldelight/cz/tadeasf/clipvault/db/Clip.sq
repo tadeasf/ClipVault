@@ -2,6 +2,7 @@ import cz.tadeasf.clipvault.model.ContentType;
 import kotlin.Boolean;
 
 -- Column order matches the domain Clip constructor, so queries map with ::Clip.
+-- seq is last because migration 1 adds it with ALTER TABLE (which appends).
 CREATE TABLE Clip (
   id TEXT NOT NULL PRIMARY KEY,
   deviceId TEXT NOT NULL,
@@ -12,32 +13,55 @@ CREATE TABLE Clip (
   sensitive INTEGER AS Boolean NOT NULL,
   pinned INTEGER AS Boolean NOT NULL DEFAULT 0,
   deleted INTEGER AS Boolean NOT NULL DEFAULT 0,
-  lamportClock INTEGER NOT NULL
+  lamportClock INTEGER NOT NULL,
+  seq INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX clip_list ON Clip(deleted, pinned, createdAt);
 CREATE INDEX clip_hash ON Clip(contentHash);
+CREATE UNIQUE INDEX clip_seq ON Clip(seq);
 
--- Full-text index keyed by Clip.rowid, kept in sync by the triggers below.
-CREATE VIRTUAL TABLE ClipFts USING fts5(content);
+-- One counter for clip writes and MetaEvents (design 5.1). Bumped with UPDATE first inside the
+-- write transaction, so SQLite's write lock makes it race-free.
+CREATE TABLE SeqCounter (
+  id INTEGER NOT NULL PRIMARY KEY CHECK (id = 1),
+  value INTEGER NOT NULL
+);
+
+INSERT INTO SeqCounter(id, value) VALUES (1, 0);
+
+-- Two full-text indexes keyed by Clip.rowid: trigram for substring search (queries >= 3 chars),
+-- unicode61 for word-prefix search of shorter tokens. Both fold diacritics ("kod" finds "kód").
+CREATE VIRTUAL TABLE ClipFts USING fts5(content, tokenize = 'trigram remove_diacritics 1');
+CREATE VIRTUAL TABLE ClipFtsPrefix USING fts5(content);
 
 CREATE TRIGGER clip_fts_insert AFTER INSERT ON Clip BEGIN
   INSERT INTO ClipFts(rowid, content) VALUES (new.rowid, new.content);
+  INSERT INTO ClipFtsPrefix(rowid, content) VALUES (new.rowid, new.content);
 END;
 
 CREATE TRIGGER clip_fts_delete AFTER DELETE ON Clip BEGIN
   DELETE FROM ClipFts WHERE rowid = old.rowid;
+  DELETE FROM ClipFtsPrefix WHERE rowid = old.rowid;
 END;
 
 -- Delete + insert: `UPDATE ClipFts SET content = new.content` overflows SQLDelight 2.4.1's resolver.
 CREATE TRIGGER clip_fts_update AFTER UPDATE OF content ON Clip BEGIN
   DELETE FROM ClipFts WHERE rowid = old.rowid;
   INSERT INTO ClipFts(rowid, content) VALUES (new.rowid, new.content);
+  DELETE FROM ClipFtsPrefix WHERE rowid = old.rowid;
+  INSERT INTO ClipFtsPrefix(rowid, content) VALUES (new.rowid, new.content);
 END;
 
+bumpSeq:
+UPDATE SeqCounter SET value = value + 1 WHERE id = 1;
+
+currentSeq:
+SELECT value FROM SeqCounter WHERE id = 1;
+
 insert:
-INSERT INTO Clip(id, deviceId, createdAt, contentType, contentHash, content, sensitive, lamportClock)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO Clip(id, deviceId, createdAt, contentType, contentHash, content, sensitive, lamportClock, seq)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 selectById:
 SELECT * FROM Clip WHERE id = ?;
@@ -45,8 +69,9 @@ SELECT * FROM Clip WHERE id = ?;
 findLiveByHash:
 SELECT id FROM Clip WHERE contentHash = ? AND deleted = 0 LIMIT 1;
 
+-- A re-copied clip gets a new seq so catch-up delivers the bump.
 touch:
-UPDATE Clip SET createdAt = :createdAt WHERE id = :id;
+UPDATE Clip SET createdAt = :createdAt, seq = :seq WHERE id = :id;
 
 setFlags:
 UPDATE Clip SET pinned = :pinned, deleted = :deleted WHERE id = :id;
@@ -66,21 +91,36 @@ WHERE deleted = 0 AND (sensitive = 0 OR sensitive = :includeSensitive)
 ORDER BY pinned DESC, createdAt DESC
 LIMIT :limit OFFSET :offset;
 
-countSearch:
+countSearchTrigram:
 SELECT count(*) FROM Clip
 JOIN ClipFts ON ClipFts.rowid = Clip.rowid
 WHERE ClipFts MATCH :query AND Clip.deleted = 0 AND (Clip.sensitive = 0 OR Clip.sensitive = :includeSensitive);
 
-search:
+searchTrigram:
 SELECT Clip.* FROM Clip
 JOIN ClipFts ON ClipFts.rowid = Clip.rowid
 WHERE ClipFts MATCH :query AND Clip.deleted = 0 AND (Clip.sensitive = 0 OR Clip.sensitive = :includeSensitive)
 ORDER BY Clip.pinned DESC, Clip.createdAt DESC
 LIMIT :limit OFFSET :offset;
 
+countSearchPrefix:
+SELECT count(*) FROM Clip
+JOIN ClipFtsPrefix ON ClipFtsPrefix.rowid = Clip.rowid
+WHERE ClipFtsPrefix MATCH :query AND Clip.deleted = 0 AND (Clip.sensitive = 0 OR Clip.sensitive = :includeSensitive);
+
+searchPrefix:
+SELECT Clip.* FROM Clip
+JOIN ClipFtsPrefix ON ClipFtsPrefix.rowid = Clip.rowid
+WHERE ClipFtsPrefix MATCH :query AND Clip.deleted = 0 AND (Clip.sensitive = 0 OR Clip.sensitive = :includeSensitive)
+ORDER BY Clip.pinned DESC, Clip.createdAt DESC
+LIMIT :limit OFFSET :offset;
+
 -- Retention is a local policy: rows are removed outright, not tombstoned, and pinned clips are exempt.
 deleteOlderThan:
 DELETE FROM Clip WHERE pinned = 0 AND createdAt < ?;
+
+deleteSensitiveOlderThan:
+DELETE FROM Clip WHERE pinned = 0 AND sensitive = 1 AND createdAt < ?;
 
 keepNewest:
 DELETE FROM Clip WHERE pinned = 0 AND id NOT IN (

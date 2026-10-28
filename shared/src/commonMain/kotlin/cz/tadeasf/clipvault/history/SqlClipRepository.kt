@@ -1,8 +1,11 @@
 package cz.tadeasf.clipvault.history
 
 import androidx.paging.PagingSource
+import app.cash.sqldelight.Query
 import app.cash.sqldelight.paging3.QueryPagingSource
 import cz.tadeasf.clipvault.db.ClipDatabase
+import cz.tadeasf.clipvault.detect.SensitiveDetector
+import cz.tadeasf.clipvault.detect.detectContentType
 import cz.tadeasf.clipvault.model.Clip
 import cz.tadeasf.clipvault.model.ClipDraft
 import cz.tadeasf.clipvault.model.MetaEvent
@@ -28,14 +31,16 @@ class SqlClipRepository(
         val hash = sha256Hex(draft.content)
         db.transactionWithResult {
             val existing = clips.findLiveByHash(hash).executeAsOneOrNull()
-            existing?.also { clips.touch(now(), it) } ?: newClip(draft, hash)
+            existing?.also { clips.touch(now(), nextSeq(), it) } ?: newClip(draft, hash)
         }
     }
 
     @OptIn(ExperimentalUuidApi::class)
     private fun newClip(draft: ClipDraft, hash: String): String {
         val id = Uuid.generateV7().toString()
-        clips.insert(id, deviceId, now(), draft.contentType, hash, draft.content, draft.sensitive, nextClock())
+        val type = detectContentType(draft.content)
+        val sensitive = SensitiveDetector.classify(draft.content, draft.hints).isNotEmpty()
+        clips.insert(id, deviceId, now(), type, hash, draft.content, sensitive, nextClock(), nextSeq())
         return id
     }
 
@@ -45,20 +50,27 @@ class SqlClipRepository(
 
     override suspend fun search(text: String, includeSensitive: Boolean, limit: Long): List<Clip> {
         val query = ftsQuery(text) ?: return emptyList()
-        return withContext(io) { clips.search(query, includeSensitive, limit, 0, ::Clip).executeAsList() }
+        return withContext(io) { searchPage(query, includeSensitive, limit, 0).executeAsList() }
     }
 
     override fun pagingSource(text: String, includeSensitive: Boolean): PagingSource<Int, Clip> {
         val query = ftsQuery(text)
-        if (query == null) {
-            return QueryPagingSource(clips.countLive(includeSensitive), clips, io, { limit, offset ->
-                clips.page(includeSensitive, limit, offset, ::Clip)
-            })
+        val count = when (query) {
+            null -> clips.countLive(includeSensitive)
+            is FtsQuery.Substring -> clips.countSearchTrigram(query.match, includeSensitive)
+            is FtsQuery.Prefix -> clips.countSearchPrefix(query.match, includeSensitive)
         }
-        return QueryPagingSource(clips.countSearch(query, includeSensitive), clips, io, { limit, offset ->
-            clips.search(query, includeSensitive, limit, offset, ::Clip)
+        return QueryPagingSource(count, clips, io, { limit, offset ->
+            if (query == null) clips.page(includeSensitive, limit, offset, ::Clip)
+            else searchPage(query, includeSensitive, limit, offset)
         })
     }
+
+    private fun searchPage(query: FtsQuery, includeSensitive: Boolean, limit: Long, offset: Long): Query<Clip> =
+        when (query) {
+            is FtsQuery.Substring -> clips.searchTrigram(query.match, includeSensitive, limit, offset, ::Clip)
+            is FtsQuery.Prefix -> clips.searchPrefix(query.match, includeSensitive, limit, offset, ::Clip)
+        }
 
     override suspend fun setPinned(id: String, pinned: Boolean) = appendMeta(id, MetaField.PINNED, pinned)
 
@@ -67,7 +79,7 @@ class SqlClipRepository(
     private suspend fun appendMeta(id: String, field: MetaField, value: Boolean) = withContext(io) {
         db.transaction {
             if (clips.selectById(id).executeAsOneOrNull() == null) return@transaction
-            meta.insert(id, field, value, nextClock(), deviceId)
+            meta.insert(nextSeq(), id, field, value, nextClock(), deviceId)
             val flags = foldMeta(meta.forClip(id, ::MetaEvent).executeAsList())
             clips.setFlags(flags.pinned, flags.deleted, id)
             if (flags.deleted) clips.wipeContent(id)
@@ -76,6 +88,7 @@ class SqlClipRepository(
 
     override suspend fun applyRetention(policy: RetentionPolicy) = withContext(io) {
         db.transaction {
+            policy.sensitiveTtlMillis?.let { clips.deleteSensitiveOlderThan(now() - it) }
             policy.maxAgeMillis?.let { clips.deleteOlderThan(now() - it) }
             policy.maxCount?.let { clips.keepNewest(it) }
             meta.deleteOrphans()
@@ -83,4 +96,10 @@ class SqlClipRepository(
     }
 
     private fun nextClock(): Long = (meta.maxLamport().executeAsOne().max ?: 0) + 1
+
+    /** Must run inside the caller's transaction: the UPDATE takes SQLite's write lock before the read. */
+    private fun nextSeq(): Long {
+        clips.bumpSeq()
+        return clips.currentSeq().executeAsOne()
+    }
 }

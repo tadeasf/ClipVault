@@ -20,8 +20,9 @@ where it was verified (2026-10-28). Update both together.
 | sqlcipher-android | 4.20.0 | Maven Central (2026-10-27), https://github.com/sqlcipher/sqlcipher-android | `.so` built with `ENABLE_FTS5` |
 | sqlite-jdbc-crypt | 3.53.4.0 | Maven Central (2026-07-26), https://github.com/Willena/sqlite-jdbc-crypt | replaces `org.xerial:sqlite-jdbc` under sqlite-driver |
 | BouncyCastle bcprov | 1.86 | Maven Central (2026-09-11) | Argon2id for the desktop key-file fallback |
+| kotlinx-serialization-json | 1.12.0 | https://github.com/Kotlin/kotlinx.serialization/releases | JSON content detection and pretty/minify; runtime library only, no compiler plugin. Builds and tests with Kotlin 2.4.21 |
+| dbus-java (core + native-unixsocket transport) | 5.2.2 | Maven Central (2026-09-26), https://github.com/hypfvieh/dbus-java | Secret Service keyring; also for the tray and GlobalShortcuts later. Brings slf4j-api (no provider bound yet) |
 | Kover | 0.9.11 | https://github.com/Kotlin/kotlinx-kover (2026-09-29) | host-JVM tests only |
 
 Added in later steps (verified in `docs/design.md` section 4, pinned when first used):
-Ktor 3.6.0, kotlinx-serialization 1.12.0, Tink 1.24.0, JmDNS 3.6.4, zxing core 3.5.4,
-dbus-java 5.2.2.
+Ktor 3.6.0, Tink 1.24.0, JmDNS 3.6.4, zxing core 3.5.4.
