@@ -39,6 +39,14 @@ kotlin {
         }
         jvmMain.get().dependsOn(jvmAndAndroidMain)
         androidMain.get().dependsOn(jvmAndAndroidMain)
+        // Tests that read resources through the JVM class loader (handshake vectors) run on all three:
+        // jvm, Android host and the device.
+        val jvmAndAndroidTest by creating {
+            dependsOn(commonTest.get())
+        }
+        jvmTest.get().dependsOn(jvmAndAndroidTest)
+        getByName("androidHostTest").dependsOn(jvmAndAndroidTest)
+        getByName("androidDeviceTest").dependsOn(jvmAndAndroidTest)
         jvmAndAndroidMain.dependencies {
             // Every handshake and pairing primitive (docs/sync/handshake.md section 2), lightweight API only.
             implementation(libs.bouncycastle.prov)
