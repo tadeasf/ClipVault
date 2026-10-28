@@ -344,7 +344,7 @@ Also:
 
 ### 6.6 KMP-specific awkwardness
 
-- **Java libraries in common code:** Tink, BouncyCastle, JmDNS and the SQLCipher drivers are all
+- **Java libraries in common code:** BouncyCastle, JmDNS and the SQLCipher drivers are all
   JVM libraries, but `commonMain` cannot call Java APIs.
   - **Resolved (step 1):** a hand-wired `jvmAndAndroidMain` source set (`dependsOn(commonMain)`,
     with `jvmMain` and `androidMain` depending on it) compiles JDK APIs (`MessageDigest`,
