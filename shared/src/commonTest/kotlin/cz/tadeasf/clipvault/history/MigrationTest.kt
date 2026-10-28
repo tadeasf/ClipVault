@@ -4,6 +4,7 @@ import app.cash.sqldelight.db.AfterVersion
 import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.db.SqlSchema
+import cz.tadeasf.clipvault.detect.SensitiveCategory
 import cz.tadeasf.clipvault.model.Clip
 import cz.tadeasf.clipvault.model.ClipDraft
 import cz.tadeasf.clipvault.model.ContentType
@@ -14,7 +15,7 @@ import kotlin.test.assertTrue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 
-/** Opens a real step-1 (v1) database with the current schema, which runs 1.sqm through the platform driver. */
+/** Opens a real step-1 (v1) database with the current schema, which runs 1.sqm and 2.sqm through the platform driver. */
 class MigrationTest {
     private val key = ByteArray(32) { 5 }
 
@@ -43,18 +44,23 @@ class MigrationTest {
         val driver = store.open(key)
         try {
             val db = clipDatabase(driver)
-            val clips = listOf("a", "b", "c").map { db.clipQueries.selectById("clip-$it", ::Clip).executeAsOne() }
+            val clips = listOf("a", "b", "c", "d").map { db.clipQueries.selectById("clip-$it", ::Clip).executeAsOne() }
 
-            // Clip seqs start after the highest existing MetaEvent seq (2), in insertion order.
-            assertEquals(listOf(3L, 4L, 5L), clips.map { it.seq })
-            assertEquals(listOf(ContentType.PLAIN, ContentType.PLAIN, ContentType.URL), clips.map { it.contentType })
+            // 1.sqm: clip seqs start after the highest existing MetaEvent seq (2), in insertion order.
+            assertEquals(listOf(3L, 4L, 5L, 6L), clips.map { it.seq })
+            assertEquals(ContentType.PLAIN, clips[0].contentType)
+            assertEquals(ContentType.PLAIN, clips[1].contentType)
+            assertEquals(ContentType.URL, clips[2].contentType)
             assertTrue(clips[0].pinned)
+            // 2.sqm: sensitive rows from before categories existed are UNKNOWN, the rest empty.
+            assertEquals(emptySet(), clips[0].categories)
+            assertEquals(setOf(SensitiveCategory.UNKNOWN), clips[3].categories)
 
             val repo = SqlClipRepository(db, "device-x", { 9_000L }, Dispatchers.Unconfined)
             assertEquals(listOf("clip-a"), repo.search("hub").map { it.id }) // trigram index rebuilt
             assertEquals(listOf("clip-b"), repo.search("namesti").map { it.id })
             assertEquals(listOf("clip-b"), repo.search("Vá").map { it.id }) // prefix index rebuilt
-            assertEquals(6L, repo.get(repo.insert(ClipDraft("after migration")))?.seq)
+            assertEquals(7L, repo.get(repo.insert(ClipDraft("after migration")))?.seq)
         } finally {
             driver.close()
         }
@@ -112,6 +118,7 @@ class MigrationTest {
             "INSERT INTO Clip VALUES ('clip-a', 'dev', 1000, 'PLAIN_TEXT', 'h-a', 'migrated github note', 0, 1, 0, 1)",
             "INSERT INTO Clip VALUES ('clip-b', 'dev', 2000, 'ADDRESS', 'h-b', 'Václavské náměstí 1', 0, 0, 0, 2)",
             "INSERT INTO Clip VALUES ('clip-c', 'dev', 3000, 'URL', 'h-c', 'https://example.com', 0, 0, 0, 3)",
+            "INSERT INTO Clip VALUES ('clip-d', 'dev', 4000, 'PLAIN_TEXT', 'h-d', '483920', 1, 0, 0, 4)",
             "INSERT INTO MetaEvent(clipId, field, value, lamportClock, deviceId) VALUES ('clip-a', 'PINNED', 1, 4, 'dev')",
             "INSERT INTO MetaEvent(clipId, field, value, lamportClock, deviceId) VALUES ('clip-b', 'PINNED', 0, 5, 'dev')",
         )

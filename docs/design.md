@@ -135,11 +135,17 @@ Implementation notes (steps 1-2):
     the highest existing MetaEvent seq, so the two never collide. `MigrationTest` runs it on jvm
     and on device.
 - **Sensitive clips (step 2):**
-  - `ClipIngest` drops clips whose source set `EXTRA_IS_SENSITIVE` (`SkipReason.MARKED_SENSITIVE_BY_SOURCE`):
-    the source asked for them not to be kept.
+  - `ClipIngest` never stores clips from a sensitive source (`SkipReason.SENSITIVE_SOURCE`). That
+    means the copying app set `EXTRA_IS_SENSITIVE`, or it is a known password manager by package
+    or window title (`KnownSensitiveSources.matches`). The system clipboard still holds the value
+    for pasting; ClipVault just doesn't record it.
   - Everything `SensitiveDetector` flags is stored with `sensitive = 1`: hidden from lists by
-    default and deleted outright by the TTL sweep (default 2 min) in `applyRetention`. Pinned
-    clips are exempt from the sweep, as from retention.
+    default and deleted outright by the TTL sweep (default 2 min) in `applyRetention`.
+  - **Pinned sensitive clips:** pinning wins, because it is an explicit user act. They are exempt
+    from the sweep, but stay hidden by default in the list. The pin UI shows a one-line warning.
+  - **Categories:** stored in `Clip.categories` as comma-separated `SensitiveCategory` names,
+    empty when the clip is not sensitive (migration `2.sqm`, step 2). Rows flagged before that
+    column existed are `UNKNOWN`. Step 5 uses this for per-category sync opt-in.
 - **Delete:** deleting a clip tombstones the row (`deleted = 1`, kept for sync) and erases
   `content` and `contentHash`, which also drops it from the FTS index.
 - **Retention:** retention by count or age is local policy. It removes rows outright, never
@@ -424,9 +430,11 @@ secret over flagging ordinary text.
   which rules out bank accounts such as `123456-1234567890/0300`.
 - **IBAN:** the ISO 13616 shape with a valid mod-97 checksum.
 - **OTP:**
-  - A clip that is only 4-8 digits (or `123 456`), unless it is a year 1900-2099.
-  - In a text of up to 300 characters, a 4-8 digit number next to a keyword: code, kód, OTP, PIN,
-    ověřovací, jednorázový and similar.
+  - A clip that is only 6 digits (or `123 456`).
+  - In a text of up to 300 characters, a 4-8 digit number (not a year 1900-2099) next to a
+    keyword: code, kód, OTP, PIN, ověřovací, jednorázový and similar.
+  - Bare 4, 5, 7 or 8 digits are deliberately not OTP. Missing a bare 4-digit PIN is accepted;
+    hiding a Prague postcode like `11000` would be the worse failure.
 - **API_KEY:**
   - OpenAI/Anthropic `sk-`, Stripe live keys, GitHub `gh?_` and `github_pat_`.
   - AWS `AKIA`/`ASIA`, Slack `xox?-`, Google `AIza`, JWT (`eyJ...eyJ...sig`).

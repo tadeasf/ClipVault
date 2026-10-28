@@ -1,6 +1,7 @@
 package cz.tadeasf.clipvault.history
 
 import androidx.paging.PagingSource
+import cz.tadeasf.clipvault.detect.SensitiveCategory
 import cz.tadeasf.clipvault.model.Clip
 import cz.tadeasf.clipvault.model.ClipDraft
 import cz.tadeasf.clipvault.model.ClipHints
@@ -173,6 +174,8 @@ class ClipRepositoryTest {
         assertFalse(url.sensitive)
         val card = assertNotNull(repo.get(repo.insert(ClipDraft("4111 1111 1111 1111"))))
         assertTrue(card.sensitive)
+        assertEquals(setOf(SensitiveCategory.CARD_NUMBER), card.categories)
+        assertEquals(emptySet(), url.categories)
         val fromManager = repo.get(repo.insert(ClipDraft("hunter2", ClipHints(sourcePackage = "com.beemdevelopment.aegis"))))
         assertTrue(assertNotNull(fromManager).sensitive)
     }

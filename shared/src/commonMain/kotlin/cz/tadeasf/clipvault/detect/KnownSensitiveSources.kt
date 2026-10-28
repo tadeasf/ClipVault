@@ -1,5 +1,7 @@
 package cz.tadeasf.clipvault.detect
 
+import cz.tadeasf.clipvault.model.ClipHints
+
 /**
  * Data only: apps and windows whose clips are treated as PASSWORD regardless of content.
  * Add entries here, not in the detector.
@@ -29,4 +31,12 @@ object KnownSensitiveSources {
         "Proton Pass",
         "Aegis",
     )
+
+    /** True when the copying app asked for the clip not to be kept, or is a password manager. */
+    fun matches(hints: ClipHints): Boolean {
+        val title = hints.sourceWindowTitle
+        return hints.isSensitiveFlag ||
+            hints.sourcePackage in packages ||
+            (title != null && windowTitles.any { title.contains(it, ignoreCase = true) })
+    }
 }

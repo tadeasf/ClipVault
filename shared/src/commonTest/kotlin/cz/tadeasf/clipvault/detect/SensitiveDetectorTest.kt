@@ -63,6 +63,12 @@ class SensitiveDetectorTest {
         "28/10/2026",
         "Datum: 28. 10. 2026",
         "2026",
+        "2024",
+        "11000", // Prague postcode without its space
+        "16000",
+        "17.11.",
+        "4821", // a bare 4-digit PIN is knowingly missed (no keyword)
+        "12345678", // bare 8 digits need a keyword
         "Rok 2026 bude dobrý",
         "123456-1234567890/0300",
         "412345-1234567898/0300", // card-like prefix and Luhn-valid digits, but a bank account

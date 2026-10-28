@@ -3,7 +3,10 @@ package cz.tadeasf.clipvault.detect
 import cz.tadeasf.clipvault.model.ClipHints
 
 enum class SensitiveCategory {
-    PASSWORD, OTP, CARD_NUMBER, IBAN, API_KEY, PRIVATE_KEY, CREDENTIALS_PAIR, SSN_LIKE_ID
+    PASSWORD, OTP, CARD_NUMBER, IBAN, API_KEY, PRIVATE_KEY, CREDENTIALS_PAIR, SSN_LIKE_ID,
+
+    /** Rows flagged sensitive before categories were stored (schema migration 2). Never produced by the detector. */
+    UNKNOWN,
 }
 
 /**
@@ -14,7 +17,7 @@ enum class SensitiveCategory {
 object SensitiveDetector {
 
     fun classify(text: String, hints: ClipHints = ClipHints()): Set<SensitiveCategory> = buildSet {
-        if (fromSensitiveSource(hints)) add(SensitiveCategory.PASSWORD)
+        if (KnownSensitiveSources.matches(hints)) add(SensitiveCategory.PASSWORD)
         if (OtpRule.matches(text)) add(SensitiveCategory.OTP)
         if (CardRule.matches(text)) add(SensitiveCategory.CARD_NUMBER)
         if (IbanRule.matches(text)) add(SensitiveCategory.IBAN)
@@ -24,21 +27,18 @@ object SensitiveDetector {
         if (BirthNumberRule.matches(text)) add(SensitiveCategory.SSN_LIKE_ID)
     }
 
-    private fun fromSensitiveSource(hints: ClipHints): Boolean {
-        val title = hints.sourceWindowTitle
-        return hints.isSensitiveFlag ||
-            hints.sourcePackage in KnownSensitiveSources.packages ||
-            (title != null && KnownSensitiveSources.windowTitles.any { title.contains(it, ignoreCase = true) })
-    }
 }
 
 /** Unicode-aware word edges that behave the same on the JVM and on Android (no \b, no (?U)). */
 private const val NOT_WORD = """(?<![\p{L}\p{N}])"""
 private const val NOT_WORD_AFTER = """(?![\p{L}\p{N}])"""
 
-/** 4-8 digits: alone (not a year), or anywhere in a short text that mentions a code. */
+/**
+ * A bare 6-digit clip (or "123 456"), or 4-8 digits in a short text that mentions a code.
+ * Bare 4, 5, 7 and 8 digits are not enough: missing a bare PIN beats hiding a postcode like 11000.
+ */
 internal object OtpRule {
-    private val whole = Regex("""^(\d{4,8}|\d{3} \d{3}|\d{4} \d{4})$""")
+    private val whole = Regex("""^(\d{6}|\d{3} \d{3})$""")
     // Not part of a longer number, date, time, account or phone number ("12.10.2026", "19-2000/0800", "+420").
     private val token = Regex("""(?<![\d+])(?<!\d[.,/:-])\d{4,8}(?!\d)(?![.,/:-]\d)""")
     // Matched against lowercased text: Android's ICU regex rejects (?U), and without it Java's \b is ASCII-only.
@@ -49,7 +49,7 @@ internal object OtpRule {
 
     fun matches(text: String): Boolean {
         val trimmed = text.trim()
-        if (whole.matches(trimmed)) return !isYear(trimmed)
+        if (whole.matches(trimmed)) return true
         if (trimmed.length > MAX_KEYWORD_TEXT || !keyword.containsMatchIn(trimmed.lowercase())) return false
         return token.findAll(trimmed).any { !isYear(it.value) }
     }

@@ -1,5 +1,7 @@
 package cz.tadeasf.clipvault.model
 
+import cz.tadeasf.clipvault.detect.SensitiveCategory
+
 /** Detection order lives in `detectContentType`: JSON, URL, EMAIL, PHONE, CODE, PLAIN. */
 enum class ContentType { URL, EMAIL, PHONE, CODE, JSON, PLAIN }
 
@@ -16,6 +18,7 @@ data class Clip(
     val deleted: Boolean,
     val lamportClock: Long,
     val seq: Long,
+    val categories: Set<SensitiveCategory>,
 )
 
 /** Platform signals that come with a captured clip. All optional; capture paths fill what they know. */

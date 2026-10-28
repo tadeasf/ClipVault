@@ -39,8 +39,8 @@ class SqlClipRepository(
     private fun newClip(draft: ClipDraft, hash: String): String {
         val id = Uuid.generateV7().toString()
         val type = detectContentType(draft.content)
-        val sensitive = SensitiveDetector.classify(draft.content, draft.hints).isNotEmpty()
-        clips.insert(id, deviceId, now(), type, hash, draft.content, sensitive, nextClock(), nextSeq())
+        val categories = SensitiveDetector.classify(draft.content, draft.hints)
+        clips.insert(id, deviceId, now(), type, hash, draft.content, categories.isNotEmpty(), nextClock(), nextSeq(), categories)
         return id
     }
 

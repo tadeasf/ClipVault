@@ -39,9 +39,15 @@ class ClipIngestTest {
     }
 
     @Test
-    fun neverStoresClipsTheSourceMarkedSensitive() = runTest {
-        val result = ingest.ingest("hunter2", ClipHints(isSensitiveFlag = true))
-        assertEquals(IngestResult.Skipped(SkipReason.MARKED_SENSITIVE_BY_SOURCE), result)
+    fun neverStoresClipsFromSensitiveSources() = runTest {
+        val sources = listOf(
+            ClipHints(isSensitiveFlag = true),
+            ClipHints(sourcePackage = "com.x8bit.bitwarden"),
+            ClipHints(sourceWindowTitle = "Vault.kdbx - KeePassXC"),
+        )
+        for (hints in sources) {
+            assertEquals(IngestResult.Skipped(SkipReason.SENSITIVE_SOURCE), ingest.ingest("hunter2", hints), "$hints")
+        }
         assertEquals(emptyList(), repository.inserted)
     }
 }
