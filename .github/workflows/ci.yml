@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: zulu
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v6
+
+      # Fails the build if the vault flavor gains a network permission or any sync code.
+      - name: Verify vault flavor is offline
+        run: ./gradlew :androidApp:verifyVaultDebugOffline :androidApp:verifyVaultReleaseOffline
+
+      - name: Tests
+        run: ./gradlew :shared:allTests :sync-core:allTests
+
+      - name: Build apps
+        run: ./gradlew :androidApp:assembleVaultDebug :androidApp:assembleSyncDebug :desktopApp:jar

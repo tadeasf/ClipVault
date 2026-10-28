@@ -7,7 +7,8 @@ plugins {
 }
 
 dependencies {
-    implementation(project(":shared"))
+    implementation(project(":ui"))
+    implementation(project(":sync-core"))
 
     implementation(compose.desktop.currentOs)
     implementation(libs.kotlinx.coroutinesSwing)
@@ -20,7 +21,7 @@ compose.desktop {
         mainClass = "cz.tadeasf.clipvault.MainKt"
 
         nativeDistributions {
-            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
+            targetFormats(TargetFormat.Deb, TargetFormat.Rpm)
             packageName = "cz.tadeasf.clipvault"
             packageVersion = "1.0.0"
         }
