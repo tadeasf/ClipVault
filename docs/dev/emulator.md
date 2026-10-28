@@ -37,7 +37,18 @@ WARNING: cannnot unmap ptr 0x7f886bc01000 as it is in the protected range from 0
 USER_INFO | Emulator is performing a full startup. This may take upto two minutes, or more.
 ```
 
-## Not yet tried
+## Final attempt (2026-10-28, step 2) and decision
+
+- `/dev/kvm` is `crw-rw-rw- root:kvm` and the user is in group `kvm`, so permissions are fine.
+- `clipvault-api35` with `-accel on`: SIGSEGV (exit 139).
+- `clipvault-api35` with `-no-accel`: SIGSEGV (exit 139), after
+  "x86_64 emulation may not work without hardware acceleration!".
+
+The crash is the same with and without KVM, so it is not an acceleration problem. **Decision:
+no more emulator attempts in this project.** Android is verified on a physical device (Samsung
+SM-S916B, Android 16 / SDK 36) over adb. The `clipvault-api35` AVD is left in place, unused.
+
+## Never tried (for anyone picking this up later)
 
 - Windowed mode (`qemu-system-x86_64`, not `-headless`) with `-gpu host`.
 - An older emulator build (a 36.x release) in case 37.2.12 regressed on kernel 7.2.
