@@ -12,6 +12,8 @@ import cz.tadeasf.clipvault.sync.wire.Hello
 import cz.tadeasf.clipvault.sync.wire.Message
 import cz.tadeasf.clipvault.sync.wire.MetaChanged
 import cz.tadeasf.clipvault.sync.wire.Payload
+import cz.tadeasf.clipvault.sync.wire.Ping
+import cz.tadeasf.clipvault.sync.wire.Pong
 import cz.tadeasf.clipvault.sync.wire.ProtocolVersion
 import cz.tadeasf.clipvault.sync.wire.Push
 import cz.tadeasf.clipvault.sync.wire.WireCodec
@@ -33,6 +35,9 @@ class WireTest {
     )
     private val messages: List<Message> = listOf(
         Hello("A", setOf("OTP")),
+        Hello("A", syncEnabledAt = 1_800_000_000_000),
+        Ping(7),
+        Pong(7),
         CatchUpRequest(5),
         CatchUpRequest(0, setOf("OTP")),
         CatchUpBatch(listOf(clip, MetaChanged(8, 4, "B", "c1", "PINNED", true)), hasMore = true, throughSeq = 8),
