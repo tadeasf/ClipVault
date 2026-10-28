@@ -74,7 +74,7 @@ words  = the first 66 bits of fp, as six 11-bit indices into the BIP-39 English 
 
 ## 2. 6-digit code (PAKE)
 
-### 2.1 Which PAKE: finite-field J-PAKE, not EC J-PAKE (open question)
+### 2.1 Which PAKE: finite-field J-PAKE, not EC J-PAKE (decided 2026-10-28)
 You asked for BouncyCastle's EC J-PAKE. I checked BouncyCastle 1.86 with `javap`:
 
 - **EC J-PAKE can't be received.** `org.bouncycastle.crypto.agreement.ecjpake.ECJPAKEParticipant`
@@ -97,8 +97,7 @@ You asked for BouncyCastle's EC J-PAKE. I checked BouncyCastle 1.86 with `javap`
 - **Same protocol design** (J-PAKE, Hao and Ryan; the EC form is RFC 8236, with RFC 8235 Schnorr
   proofs).
 
-**Proposal:** finite-field J-PAKE over `NIST_3072` with SHA-256. Everything below assumes it. If
-you prefer EC J-PAKE through reflection, only the payload encoding in 2.3 changes.
+**Decided:** finite-field J-PAKE over `NIST_3072` with SHA-256, no reflection.
 
 ### 2.2 Code window
 - B shows a code: six digits, uniform from 000000 to 999999 (CSPRNG). It is valid for **2
@@ -152,6 +151,14 @@ Identity { idPub: bstr(32), name: tstr (≤ 64 bytes UTF-8), sig: bstr(64) }
 sig = SIGN(id, lp("clipvault-id-v1") || lp(h3) || lp(name))      h3: handshake.md section 3.3
 ```
 
+**The name is untrusted text.** Before it is stored or displayed, the receiver:
+- strips control characters (Unicode category Cc, plus U+2028 and U+2029);
+- strips bidi controls: U+061C, U+200E, U+200F, U+202A to U+202E and U+2066 to U+2069;
+- trims whitespace and caps the result at 64 UTF-8 bytes, cutting only at a code point boundary.
+
+An empty result becomes `"unnamed device"`. The signature covers the name as sent, before
+stripping.
+
 **The receiver checks:**
 - `sig` verifies under `idPub`, which proves possession of the key and ties it to this session;
 - `idPub` is not its own key.
@@ -190,5 +197,8 @@ readers ignore unknown types, so they are minor-version additions (protocol 1.1)
   confirmation.
 - **No Compose window on desktop in v1.** This replaces the step 8 plan item "a small Compose
   desktop window for pairing".
-- **Pairing two desktops:** one side runs `pair --code`. How the other side *enters* the code and
-  finds the address is open question 4.
+- **Pairing two desktops:** one side runs `pair --code`; the other runs `pair --join`.
+  - While a code window is open, the responder advertises its mDNS service with the TXT record
+    `pairing=1`. The flag disappears when the window closes.
+  - `pair --join` lists the candidates that show the flag. The user picks one and types the code.
+  - `pair --join --addr host:port` skips discovery, for networks without multicast.
