@@ -13,6 +13,9 @@ work=$(mktemp -d)
 dpkg-deb -R "$deb" "$work"
 # Insert before Description: jpackage's control ends with a blank line, so appending would start a second stanza.
 grep -q '^Recommends:' "$work/DEBIAN/control" || sed -i '/^Description:/i Recommends: copyq' "$work/DEBIAN/control"
+# jpackage's postinst/prerm run xdg-desktop-menu under `set -e`; it fails where /usr/share/applications is
+# missing (minimal/headless systems) and leaves the package half-configured. The agent doesn't need a menu entry.
+sed -i 's/^\(xdg-desktop-menu .*\)$/\1 || true/' "$work"/DEBIAN/postinst "$work"/DEBIAN/prerm
 fakeroot dpkg-deb -b "$work" "$deb"
 dpkg-deb -f "$deb" Package Version Recommends
 
