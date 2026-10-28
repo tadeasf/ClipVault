@@ -29,7 +29,9 @@ class Device(val id: String, dir: File, config: SyncConfig, private val now: () 
     private val syncDriver = JvmDriverFactory(File(dir, "$id-sync.db"), SyncDatabase.Schema).open(key)
     val db: ClipDatabase = clipDatabase(clipDriver)
     val syncDb = SyncDatabase(syncDriver)
-    private val repo = SqlClipRepository(db, id, now, Dispatchers.Unconfined)
+    /** The id local events are authored under; enableSync switches it to the identity-derived one. */
+    var deviceId: String = id
+    private val repo get() = SqlClipRepository(db, deviceId, now, Dispatchers.Unconfined)
     val node = SyncNode(db, syncDb, config)
 
     suspend fun copy(text: String, sourcePackage: String? = null): String =

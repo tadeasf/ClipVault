@@ -193,6 +193,11 @@ class SecureConnection private constructor(
     }
 
     private fun handshake(body: ByteArray) {
+        // A J-PAKE opener (about 1.6 KB) is recognised before the 256-byte handshake limit applies.
+        if (!initiating && responder == null && body.isNotEmpty() && body[0] == PAKE_R1) {
+            if (body.size > MAX_PAKE_MESSAGE) throw HandshakeFailure(HandshakeFailure.Kind.MALFORMED, "pake size")
+            return startPakeResponder(body)
+        }
         if (body.size > MAX_HANDSHAKE_MESSAGE) throw HandshakeFailure(HandshakeFailure.Kind.MALFORMED, "handshake message too large")
         if (initiating) {
             val (fin, keys) = initiator!!.onResp(body)
@@ -202,7 +207,6 @@ class SecureConnection private constructor(
         }
         val responder = responder
         if (responder == null) {
-            if (body.isNotEmpty() && body[0] == PAKE_R1) return startPakeResponder(body)
             this.responder = Responder(c, e.peers.identity(), e.peers.candidates(), ::bindingFor).also { send(it.onInit(body)) }
             mode = this.responder!!.mode
             return
