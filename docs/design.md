@@ -606,7 +606,7 @@ and `tab`, plus its scripting.
   - `push-test TEXT`: pushes TEXT into CopyQ the way a phone-origin clip would travel.
   - `config KEY [VALUE]`.
 
-### 11.3 CopyQ facts the design relies on (verified against CopyQ 17.0.0 and its docs)
+### 11.3 CopyQ facts the design relies on (CopyQ 17.0.0: its docs and source, and behaviour observed on this machine)
 - **Automatic commands:** these run on every new clipboard item. `data(mimeText)` returns the
   clipboard text, and `execute(prog, args..., null, stdin)` runs a program with stdin.
   Commands are managed with `commands()` / `setCommands()`, so the installer edits only its own
@@ -654,8 +654,17 @@ and `tab`, plus its scripting.
 
 ### 11.5 Keys and headless start
 The store key comes from the Secret Service (dbus-java). With no keyring, the passphrase fallback
-needs a terminal. `run` in a terminal prompts for the passphrase; as a systemd service it exits
-with a clear message, because a headless daemon has nowhere to ask.
+needs a terminal. `run` in a terminal prompts for the passphrase; as a systemd service it has
+nowhere to ask.
+
+**A key that can't be used is fatal, not retried** (`StoreKeyException`). The agent prints one
+line saying what to do and exits with 78 (`EX_CONFIG`); the unit's `RestartPreventExitStatus=78`
+stops systemd from restarting it. Three cases:
+- the store exists but its key is not in the keyring (for example, the keyring was replaced);
+- the key in the keyring doesn't open the store (`SQLITE_NOTADB`);
+- there is no keyring and no terminal to ask for a passphrase.
+
+Before this, a replaced keyring made the service crash-loop: 95 restarts with exit 1.
 
 ### 11.6 Desktop exclusions
 `excludedPackages` matches the window title CopyQ reports, a case-insensitive substring per
@@ -676,22 +685,34 @@ CopyQ stores a clip before ClipVault sees it, so with `scrub_copyq_sensitive` (S
   `removeNewestIfHash(tab, sha256)` at 1, 2 and 5 s. The hash comparison runs inside CopyQ
   (`sha256sum(read(0))`), so the agent never reads a row. Only the newest row; no retroactive scan.
 
-### 11.8 CopyQ tab encryption without the dialog
-Verified against CopyQ 17.0.0 source (`src/common/keychainaccess.cpp`) and a rehearsal on this
-machine: CopyQ takes the password from `COPYQ_PASSWORD` in the server's
-environment and, with `use_key_store=true`, saves it through QtKeychain. The libsecret backend
-stores it as an `org.qt.keychain` item with attributes `server=com.github.hluk.copyq`,
-`user=Password` (or `PasswordForSession-<name>` for `copyq -s NAME`), label
-`<user>@com.github.hluk.copyq`. Encrypted data: `kek_salt.dat` and `wrapped_dek.dat` next to the
-tab files.
+### 11.8 CopyQ tab encryption: report only (revised 2026-10-28)
+ClipVault does not change CopyQ's encryption settings. `install-copyq --check-encryption` reads
+`copyq config encrypt_tabs`, prints the result and the three manual steps (`ENCRYPTION_ADVICE`),
+and exits 1 while it is `false`. `status` prints the same line.
 
-`install-copyq --encrypt` (`CopyqEncryption`): count items over all tabs; generate a random
-32-byte password and keep a backup in the keyring (`cz.tadeasf.clipvault` /
-`copyq-tab-password[-session]`), verifying the read-back; restart CopyQ with `COPYQ_PASSWORD`
-and its original environment; `config encrypt_tabs true`; restart without the variable; require
-encryption on and the same item count. Rehearsed on a throwaway offscreen session (`-s cvenc`,
-own settings dir): 3 of 3 items before and after, and a cold start without the variable still
-opened all 3, so the key came from the keyring.
+**Incident (2026-10-28):** an `install-copyq --encrypt` command briefly existed and was removed the
+same day.
+- **What it did:** it generated a random password inside the agent, stored it only in the login
+  keyring (CopyQ's own item plus a ClipVault "backup" item in the same keyring), and turned on
+  `encrypt_tabs` on the user's real CopyQ.
+- **What went wrong:** the user later replaced the login keyring, and CopyQ's history became
+  unrecoverable. The backup shared the original's single point of failure, and no copy of CopyQ's
+  config or data was made beforehand.
+- **What stopped:** generating secrets on the user's behalf and writing another app's settings. The
+  rules in section 12 come from this incident.
+
+**What was established, and how:**
+- **Observed on this machine** (offscreen session `copyq -s cvenc` with its own
+  `COPYQ_SETTINGS_PATH`): with `COPYQ_PASSWORD` in the server's environment, `config encrypt_tabs
+  true` enabled encryption without a dialog. A restart without the variable opened the same number
+  of items.
+- **Observed as Secret Service metadata:** an `org.qt.keychain` item with attributes
+  `server=com.github.hluk.copyq` and `user=Password` (`PasswordForSession-<name>` for a named
+  session), labelled `<user>@com.github.hluk.copyq`.
+- **Read in source only** (CopyQ 17.0.0 `src/common/keychainaccess.cpp`): CopyQ stores that
+  password through QtKeychain read, write and delete jobs.
+- **Not established:** CopyQ's key derivation and where it keeps its encrypted data. The user
+  reports the encrypted data was in `copyq_tab_*.dat` under `~/.local/share/copyq/copyq/`.
 
 The systemd unit sets `SuccessExitStatus=143`: SIGTERM ends the JVM with 143, which is a clean
 stop, not a failure.
@@ -700,3 +721,31 @@ stop, not a failure.
 Never read rows from the user's CopyQ tabs, ClipVault store or clipboard. Tests that need real
 data flow use a CopyQ tab `clipvault-test` that the test creates, fills with generated content and
 deletes. Aggregate counts (`status`) are fine.
+
+## 12. Secrets and third-party config (rules, from 2026-10-28)
+
+These bind both the code and whoever works on it, including the assistant in a session.
+
+1. **No secrets on the user's behalf.**
+   - Nobody generates, stores or handles a secret for the user.
+   - Keys ClipVault needs are generated by ClipVault at runtime, for the user running it, through
+     its normal key paths (`keyFor()`, and later the identity key). A developer or assistant session
+     never creates one.
+   - ClipVault never generates passwords for other apps.
+2. **Writes need a per-action yes.**
+   - No writes under `~/.config` or `~/.local/share` outside ClipVault's own directories, and no
+     keyring writes except ClipVault's own entries, without the user's explicit yes in chat for
+     that action.
+   - Reading state is fine.
+   - ClipVault's own directories: `~/.local/share/clipvault`, `$XDG_RUNTIME_DIR/clipvault`, and its
+     unit file `~/.config/systemd/user/clipvault-agent.service`.
+   - The only thing the agent writes to CopyQ's configuration is its own "ClipVault ingest"
+     automatic command (`install-copyq`).
+3. **Back up before changing another app's config.**
+   - Copy that app's config dir to `~/clipvault-backups/<app>-<timestamp>/` first, and name the copy
+     in the report.
+4. **Claim only what was checked.**
+   - "Verified" means it was run or observed.
+   - Reading code or docs is reported as "read in source" or "per the docs".
+5. **No user data in tests** (11.9): no rows from the user's CopyQ, ClipVault store or clipboard;
+   test data is generated, and lives in a `clipvault-test` tab or a throwaway session.

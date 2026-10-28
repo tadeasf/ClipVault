@@ -42,15 +42,29 @@ clipvault-agent status
   Turn it off with `clipvault-agent config scrub_copyq_sensitive off`.
 - **Plaintext risk:** CopyQ keeps its own history, and unless CopyQ's tab encryption is on, that
   history is plaintext on disk. `clipvault-agent status` says `copyq: tabs unencrypted` while this
-  is the case. `clipvault-agent install-copyq --encrypt` turns it on without CopyQ's password
-  dialog: it generates a random password, keeps a backup in your keyring (service
-  `cz.tadeasf.clipvault`, account `copyq-tab-password`), restarts CopyQ twice and checks that every
-  tab still opens. CopyQ keeps its own copy in the keyring (`org.qt.keychain` item
-  `Password@com.github.hluk.copyq`) and unlocks with it at login.
-  `clipvault-agent install-copyq --check-encryption` exits 1 while tabs are unencrypted.
+  is the case. ClipVault never changes CopyQ's encryption: `clipvault-agent install-copyq
+  --check-encryption` only reports it (exit 1 while off) and prints how to turn it on in CopyQ's
+  Preferences, with a password you choose.
+- **Lost keyring:** if the store's key is gone (for example, the keyring was replaced), the
+  service exits once with status 78 and a one-line message, instead of restarting in a loop. Move
+  `~/.local/share/clipvault/history.db` aside and restart the service to start a new, empty
+  history.
 - **GNOME on Wayland:** CopyQ cannot tell which app a clip came from, so per-app exclusions are
   unavailable on GNOME for now. A small ClipVault GNOME extension that reports the focused app is
   planned for step 9. Exclusions work where CopyQ reports a window title (X11, some compositors).
+
+## Secrets and third-party config
+
+- ClipVault generates the keys it needs itself, at runtime, for the user running it. It never
+  generates or stores passwords for other apps.
+- It writes only to its own directories (`~/.local/share/clipvault`, `$XDG_RUNTIME_DIR/clipvault`),
+  its own systemd unit, and its own keyring entries (service `cz.tadeasf.clipvault`).
+- The only change it makes to CopyQ is adding its "ClipVault ingest" automatic command, and only
+  when you run `clipvault-agent install-copyq`.
+- Development follows the same rules (docs/design.md section 12): no writes to other apps' config
+  or the keyring without an explicit yes, a timestamped backup to
+  `~/clipvault-backups/<app>-<timestamp>/` before any such change, and "verified" only for things
+  that were actually run.
 
 ## Modules
 

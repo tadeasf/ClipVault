@@ -213,6 +213,20 @@ class AgentTest {
         assertContains(script, "indexOf(\\\"scrub\\\") >= 0) ignore();")
     }
 
+    // Missing key
+
+    @Test
+    fun aStoreWithoutItsKeyFailsWithTheNoRestartExitCode() {
+        // keyFor(databaseExists = true) only ever loads, so no keyring is written whichever one this runs against.
+        val paths = AgentPaths(File(dir, "lost"), File(dir, "lost-run"))
+        paths.prepare()
+        paths.database.writeBytes(Random.nextBytes(4096)) // a store from a key we no longer have
+        val error = kotlin.test.assertFailsWith<StoreKeyException> { openStore(paths) }
+        assertContains(error.message!!, "Move ${paths.database} aside")
+        assertContains(SystemdUnit.text("/opt/clipvault-agent/bin/clipvault-agent"), "RestartPreventExitStatus=${StoreKeyException.EXIT_CODE}")
+        assertEquals(78, StoreKeyException.EXIT_CODE)
+    }
+
     @Test
     fun sessionSwitchIsPassedToEveryCall() {
         assertEquals(listOf("copyq", "-s", "cvtest", "eval", "-"), CopyQ("copyq", session = "cvtest").command(listOf("eval", "-")))

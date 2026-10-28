@@ -1,6 +1,5 @@
 package cz.tadeasf.clipvault.agent
 
-import cz.tadeasf.clipvault.security.SecretServiceKeyring
 import kotlin.system.exitProcess
 import kotlinx.coroutines.runBlocking
 
@@ -12,8 +11,7 @@ private const val USAGE = """Usage: clipvault-agent [--session NAME] <command>
   push-test TEXT              send TEXT to CopyQ the way a phone clip would travel
   install-copyq               add the "ClipVault ingest" automatic command to CopyQ
   install-copyq --check-encryption
-                              is CopyQ's history encrypted on disk? (exit 1 if not)
-  install-copyq --encrypt     turn on CopyQ's tab encryption, password kept in the keyring
+                              is CopyQ's history encrypted on disk? (reports only; exit 1 if not)
   install-service             install and start the systemd user service
   config [KEY [VALUE]]        promote_to_clipboard on|off, scrub_copyq_sensitive on|off,
                               copyq_tab NAME|default, exclude TITLE, unexclude TITLE
@@ -22,7 +20,12 @@ private const val USAGE = """Usage: clipvault-agent [--session NAME] <command>
 fun main(args: Array<String>) {
     val session = args.indexOf("--session").takeIf { it >= 0 }?.let { args.getOrNull(it + 1) }
     val rest = if (session == null) args.toList() else args.toList() - listOf("--session", session)
-    val code = runBlocking { Cli(AgentPaths.fromEnvironment(), CopyQ(session = session)).run(rest) }
+    val code = try {
+        runBlocking { Cli(AgentPaths.fromEnvironment(), CopyQ(session = session)).run(rest) }
+    } catch (e: StoreKeyException) {
+        System.err.println(e.message)
+        StoreKeyException.EXIT_CODE
+    }
     exitProcess(code)
 }
 
@@ -35,7 +38,6 @@ class Cli(private val paths: AgentPaths, private val copyq: CopyQ) {
         "push-test" -> args.getOrNull(1)?.let { push(it) } ?: usage()
         "install-copyq" -> when {
             "--check-encryption" in args -> checkEncryption()
-            "--encrypt" in args -> encrypt()
             else -> installCopyq()
         }
         "install-service" -> agentBinary()?.let { SystemdUnit.install(it) } ?: noLauncher()
@@ -95,15 +97,8 @@ class Cli(private val paths: AgentPaths, private val copyq: CopyQ) {
 
     private fun checkEncryption(): Int = when (copyq.tabsEncrypted()) {
         true -> println("copyq: tabs encrypted").let { 0 }
-        false -> println("copyq: tabs unencrypted\n\n$ENCRYPTION_ADVICE\n\nOr let the agent do it: clipvault-agent install-copyq --encrypt").let { 1 }
+        false -> println("copyq: tabs unencrypted\n\n$ENCRYPTION_ADVICE").let { 1 }
         null -> fail("CopyQ is not running (or too old to report tab encryption).")
-    }
-
-    private fun encrypt(): Int {
-        val keyring = SecretServiceKeyring.detect() ?: return fail("Needs a Secret Service keyring to keep CopyQ's password.")
-        val restarter = CopyqRestarter(copyq) { CopyqRestarter.serverEnvironment(copyq.session) }
-        return runCatching { println(CopyqEncryption(copyq, keyring, restarter).enable()) }
-            .fold({ 0 }, { fail("Encryption not finished: ${it.message}") })
     }
 
     private fun config(args: List<String>): Int {
