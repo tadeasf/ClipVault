@@ -1,0 +1,27 @@
+-- v4 (step 3) -> v5 (step 5): sync groups (docs/sync/protocol.md section 7), a Lamport clock that
+-- survives retention, and deduplicated MetaEvents. Every existing clip becomes its own only member.
+
+CREATE TABLE ClipMember (
+  id TEXT NOT NULL PRIMARY KEY,
+  clipId TEXT NOT NULL,
+  deviceId TEXT NOT NULL,
+  createdAt INTEGER NOT NULL,
+  lamportClock INTEGER NOT NULL,
+  seq INTEGER NOT NULL
+);
+
+CREATE INDEX member_clip ON ClipMember(clipId);
+CREATE UNIQUE INDEX member_seq ON ClipMember(seq);
+
+INSERT INTO ClipMember(id, clipId, deviceId, createdAt, lamportClock, seq)
+SELECT id, id, deviceId, createdAt, lamportClock, seq FROM Clip;
+
+CREATE TABLE LamportClock (
+  id INTEGER NOT NULL PRIMARY KEY CHECK (id = 1),
+  value INTEGER NOT NULL
+);
+
+INSERT INTO LamportClock(id, value)
+SELECT 1, coalesce(max(lamportClock), 0) FROM (SELECT lamportClock FROM Clip UNION ALL SELECT lamportClock FROM MetaEvent);
+
+CREATE UNIQUE INDEX meta_unique ON MetaEvent(clipId, field, value, lamportClock, deviceId);

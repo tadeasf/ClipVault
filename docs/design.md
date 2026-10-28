@@ -99,6 +99,8 @@ a one-line justification in their PR.
 | QR generate | `com.google.zxing:core` 3.5.4 | Pure Java, both platforms |
 | QR scan (Android) | CameraX + zxing core analyzer | zxing-android-embedded is stale (2021); ML Kit needs Google Play Services, not allowed on F-Droid. CameraX version **[verify at step 8]** |
 | Paging | AndroidX Paging 3.5.3 + `app.cash.sqldelight:androidx-paging3-extensions` 2.4.1 | cashapp multiplatform-paging has had no release since 2024-02 |
+| Sync wire format (step 5) | `kotlinx-serialization-cbor` 1.12.0 | Self-describing, so higher minor versions are read by skipping unknown fields; native byte strings; first-party and multiplatform. Protobuf would need field numbers on everything and is equally experimental (docs/sync/protocol.md section 2) |
+| Property tests (step 5, test only) | `io.kotest:kotest-property` 6.2.6 | Multiplatform, works inside plain kotlin.test without the kotest engine, shrinks failures. jqwik is JUnit 5 and JVM-only |
 | Coverage | Kover 0.9.11 | |
 
 **F-Droid and native libraries.** The Inclusion Policy allows prebuilt FLOSS binaries from
@@ -133,7 +135,8 @@ Implementation notes (steps 1-2):
     value, inside the caller's transaction. The UPDATE takes SQLite's write lock before the read,
     so two writers cannot get the same seq.
   - **Re-copy:** a re-copied clip (dedupe bump) gets a new seq, so catch-up delivers the bump.
-  - **Catch-up (step 5):** `Clip.seq > N UNION MetaEvent.seq > N ORDER BY seq`.
+  - **Catch-up (step 5):** `ClipMember.seq > N` merged with `MetaEvent.seq > N`, in seq order
+    (protocol.md section 11).
   - **Migration:** `1.sqm` takes step-1 databases to this schema. Existing clips get seqs after
     the highest existing MetaEvent seq, so the two never collide. `MigrationTest` runs it on jvm
     and on device.
@@ -394,8 +397,14 @@ The brief's steps 0-9 stay as given. Adjustments:
   front end, replaces the Compose desktop history UI (section 11).
   - **Moved here from step 9:** packaging (`.rpm`/`.deb`/AppImage) and the systemd user unit.
   - **Dropped:** tray, global hotkey and the desktop history/detail/settings screens.
-- **Step 5:** the sync bookkeeping DB lives in `:sync-core`, catch-up is seq-based, and metadata
-  changes are log entries (5.1).
+- **Step 5:** done. The protocol is specified in [`docs/sync/protocol.md`](sync/protocol.md). The
+  sync bookkeeping DB lives in `:sync-core`, catch-up is seq-based, and metadata changes are log
+  entries (5.1).
+  - **Members:** migration `4.sqm` adds `ClipMember`, so one `Clip` row can stand for the same
+    content created on several devices. It also adds a `LamportClock` table, because retention must
+    not move the clock back, and a unique MetaEvent index so duplicates are no-ops.
+  - **Re-copy:** a re-copy bumps the newest live member instead of re-seq'ing the row.
+  - **Pin and delete:** these act on every live member of a row.
 - **Step 6:** `docs/sync/handshake.md` is written and reviewed before any handshake code.
 - **Step 7:** transport and discovery, plus the agent's sync loop.
 - **Step 8:** the sync UI on Android, plus a small Compose desktop window for pairing and status.

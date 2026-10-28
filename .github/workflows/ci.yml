@@ -31,7 +31,7 @@ jobs:
         run: |
           dbus-run-session -- bash -c '
             echo -n ci | gnome-keyring-daemon --unlock --components=secrets > /dev/null
-            ./gradlew :shared:allTests :ui:allTests :sync-core:allTests :shared:koverVerifyJvm :shared:koverHtmlReport
+            ./gradlew :shared:allTests :ui:allTests :sync-core:allTests :shared:koverVerifyJvm :shared:koverHtmlReport :sync-core:koverVerifyJvm
           '
 
       - name: Report whether the Secret Service test ran

@@ -15,7 +15,7 @@ import kotlin.test.assertTrue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 
-/** Opens a real step-1 (v1) database with the current schema, which runs 1.sqm and 2.sqm through the platform driver. */
+/** Opens a real step-1 (v1) database with the current schema, which runs 1.sqm to 4.sqm through the platform driver. */
 class MigrationTest {
     private val key = ByteArray(32) { 5 }
 
@@ -60,7 +60,13 @@ class MigrationTest {
             assertEquals(listOf("clip-a"), repo.search("hub").map { it.id }) // trigram index rebuilt
             assertEquals(listOf("clip-b"), repo.search("namesti").map { it.id })
             assertEquals(listOf("clip-b"), repo.search("Vá").map { it.id }) // prefix index rebuilt
-            assertEquals(7L, repo.get(repo.insert(ClipDraft("after migration")).id)?.seq)
+            val after = repo.get(repo.insert(ClipDraft("after migration")).id)
+            assertEquals(7L, after?.seq)
+            // 4.sqm: every clip is its own member, and the Lamport clock continues after the highest old clock (5).
+            assertEquals(listOf("clip-a" to 3L), db.clipMemberQueries.forClip("clip-a").executeAsList().map { it.id to it.seq })
+            assertEquals(6L, after?.lamportClock)
+            repo.setPinned("clip-a", false) // meta changes reach migrated clips through their member
+            assertEquals(false, repo.get("clip-a")?.pinned)
         } finally {
             driver.close()
         }

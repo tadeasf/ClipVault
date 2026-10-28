@@ -26,6 +26,8 @@ where it was verified (2026-10-28). Update both together.
 | AndroidX Paging Compose | 3.5.3 | Google Maven (`paging-compose-desktop` variant exists) | paged history list in `:ui` |
 | SQLDelight coroutines-extensions | 2.4.1 | Maven Central | live clip counts (`asFlow().mapToOne`) |
 | androidx.compose.ui ui-test-junit4 / ui-test-manifest | 1.12.1 | Google Maven | matches the androidx Compose UI that CMP 1.12.2 resolves to on Android (1.12.1); test only |
+| kotlinx-serialization-cbor + Kotlin serialization plugin | 1.12.0 / 2.4.21 | Maven Central (1.12.0 is the newest release), https://github.com/Kotlin/kotlinx.serialization/releases | `:sync-core` wire format (docs/sync/protocol.md section 2); same release line as serialization-json |
+| kotest-property | 6.2.6 | Maven Central (2026-10-14) | `:sync-core` property tests only; used standalone (`checkAll`) inside kotlin.test, no kotest engine |
 | Kover | 0.9.11 | https://github.com/Kotlin/kotlinx-kover (2026-09-29) | host-JVM tests only |
 
 Added in later steps (verified in `docs/design.md` section 4, pinned when first used):

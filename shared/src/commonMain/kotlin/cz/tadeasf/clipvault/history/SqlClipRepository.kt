@@ -13,10 +13,8 @@ import cz.tadeasf.clipvault.model.ClipCounts
 import cz.tadeasf.clipvault.model.ClipDraft
 import cz.tadeasf.clipvault.model.ClipFilter
 import cz.tadeasf.clipvault.model.InsertResult
-import cz.tadeasf.clipvault.model.MetaEvent
 import cz.tadeasf.clipvault.model.MetaField
 import cz.tadeasf.clipvault.model.RetentionPolicy
-import cz.tadeasf.clipvault.model.foldMeta
 import cz.tadeasf.clipvault.security.sha256Hex
 import kotlin.coroutines.CoroutineContext
 import kotlin.uuid.ExperimentalUuidApi
@@ -33,13 +31,19 @@ class SqlClipRepository(
 ) : ClipRepository {
     private val clips get() = db.clipQueries
     private val meta get() = db.metaEventQueries
+    private val members get() = db.clipMemberQueries
+    private val log = ClipLog(db)
 
     override suspend fun insert(draft: ClipDraft): InsertResult = withContext(io) {
         val hash = sha256Hex(draft.content)
         db.transactionWithResult {
             val existing = clips.findLiveByHash(hash).executeAsOneOrNull()
             if (existing == null) return@transactionWithResult newClip(draft, hash)
-            clips.touch(now(), nextSeq(), existing)
+            // Re-copy bumps the newest live member, so the bump replicates (protocol.md section 7).
+            val (at, seq) = now() to log.nextSeq()
+            log.tick()
+            log.liveMembers(existing).maxByOrNull { it.createdAt }?.let { members.bump(at, seq, it.id) }
+            clips.touch(at, seq, existing)
             InsertResult(existing, duplicate = true, sensitive = clips.selectById(existing).executeAsOne().sensitive)
         }
     }
@@ -50,10 +54,9 @@ class SqlClipRepository(
         val type = detectContentType(draft.content)
         val categories = SensitiveDetector.classify(draft.content, draft.hints)
         val sensitive = categories.isNotEmpty()
-        clips.insert(
-            id, deviceId, now(), type, hash, draft.content, sensitive, nextClock(), nextSeq(), categories,
-            draft.hints.sourcePackage,
-        )
+        val (createdAt, clock, seq) = Triple(now(), log.tick(), log.nextSeq())
+        clips.insert(id, deviceId, createdAt, type, hash, draft.content, sensitive, clock, seq, categories, draft.hints.sourcePackage)
+        members.insert(id, id, deviceId, createdAt, clock, seq)
         return InsertResult(id, duplicate = false, sensitive = sensitive)
     }
 
@@ -99,13 +102,11 @@ class SqlClipRepository(
 
     override suspend fun delete(id: String) = appendMeta(id, MetaField.DELETED, true)
 
+    /** A row may hold several members (same content copied on several devices): the change applies to each live one. */
     private suspend fun appendMeta(id: String, field: MetaField, value: Boolean) = withContext(io) {
         db.transaction {
-            if (clips.selectById(id).executeAsOneOrNull() == null) return@transaction
-            meta.insert(nextSeq(), id, field, value, nextClock(), deviceId)
-            val flags = foldMeta(meta.forClip(id, ::MetaEvent).executeAsList())
-            clips.setFlags(flags.pinned, flags.deleted, id)
-            if (flags.deleted) clips.wipeContent(id)
+            log.liveMembers(id).forEach { meta.insert(log.nextSeq(), it.id, field, value, log.tick(), deviceId) }
+            log.refold(id)
         }
     }
 
@@ -114,15 +115,8 @@ class SqlClipRepository(
             policy.sensitiveTtlMillis?.let { clips.deleteSensitiveOlderThan(now() - it) }
             policy.maxAgeMillis?.let { clips.deleteOlderThan(now() - it) }
             policy.maxCount?.let { clips.keepNewest(it) }
+            members.deleteOrphans()
             meta.deleteOrphans()
         }
-    }
-
-    private fun nextClock(): Long = (meta.maxLamport().executeAsOne().max ?: 0) + 1
-
-    /** Must run inside the caller's transaction: the UPDATE takes SQLite's write lock before the read. */
-    private fun nextSeq(): Long {
-        clips.bumpSeq()
-        return clips.currentSeq().executeAsOne()
     }
 }
