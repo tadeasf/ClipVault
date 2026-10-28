@@ -1,21 +1,28 @@
 package cz.tadeasf.clipvault.agent
 
+import cz.tadeasf.clipvault.security.SecretServiceKeyring
 import kotlin.system.exitProcess
 import kotlinx.coroutines.runBlocking
 
-private const val USAGE = """Usage: clipvault-agent <command>
+private const val USAGE = """Usage: clipvault-agent [--session NAME] <command>
   run                         start the daemon (normally via the systemd user service)
-  status                      what the agent is doing
+  status [--dry-run]          what the agent is doing (--dry-run: without opening the store)
   ingest [--title T] [--non-text]
                               store the clip on stdin (called by the CopyQ command)
   push-test TEXT              send TEXT to CopyQ the way a phone clip would travel
   install-copyq               add the "ClipVault ingest" automatic command to CopyQ
+  install-copyq --check-encryption
+                              is CopyQ's history encrypted on disk? (exit 1 if not)
+  install-copyq --encrypt     turn on CopyQ's tab encryption, password kept in the keyring
   install-service             install and start the systemd user service
-  config [KEY [VALUE]]        promote_to_clipboard on|off, copyq_tab NAME|default,
-                              exclude TITLE, unexclude TITLE"""
+  config [KEY [VALUE]]        promote_to_clipboard on|off, scrub_copyq_sensitive on|off,
+                              copyq_tab NAME|default, exclude TITLE, unexclude TITLE
+  --session NAME              talk to CopyQ session NAME (copyq -s NAME) instead of the default"""
 
 fun main(args: Array<String>) {
-    val code = runBlocking { Cli(AgentPaths.fromEnvironment(), CopyQ()).run(args.toList()) }
+    val session = args.indexOf("--session").takeIf { it >= 0 }?.let { args.getOrNull(it + 1) }
+    val rest = if (session == null) args.toList() else args.toList() - listOf("--session", session)
+    val code = runBlocking { Cli(AgentPaths.fromEnvironment(), CopyQ(session = session)).run(rest) }
     exitProcess(code)
 }
 
@@ -23,12 +30,17 @@ class Cli(private val paths: AgentPaths, private val copyq: CopyQ) {
 
     suspend fun run(args: List<String>): Int = when (args.firstOrNull()) {
         "run" -> runDaemon(AgentCore(openStore(paths), copyq), copyq, paths, GnomeFallback()).let { 0 }
-        "status" -> status()
+        "status" -> if ("--dry-run" in args) dryRunStatus() else status()
         "ingest" -> ingest(args.drop(1), System.`in`.readBytes())
         "push-test" -> args.getOrNull(1)?.let { push(it) } ?: usage()
-        "install-copyq" -> installCopyq()
+        "install-copyq" -> when {
+            "--check-encryption" in args -> checkEncryption()
+            "--encrypt" in args -> encrypt()
+            else -> installCopyq()
+        }
         "install-service" -> agentBinary()?.let { SystemdUnit.install(it) } ?: noLauncher()
         "config" -> config(args.drop(1))
+        "--help", "-h", "help" -> println(USAGE).let { 0 }
         else -> usage()
     }
 
@@ -41,7 +53,8 @@ class Cli(private val paths: AgentPaths, private val copyq: CopyQ) {
         }
         val request = AgentRequest(Commands.INGEST, params, stdin)
         val answer = sendToDaemon(paths.socket, request)
-            ?: runCatching { local().ingest(request.toIngest()).name.lowercase() }.getOrElse { "error: ${it.message}" }
+            ?: runCatching { local().let { it.ingest(request.toIngest()).reply(it.state.scrubSensitive) } }
+                .getOrElse { "error: ${it.message}" }
         println(answer)
         return 0
     }
@@ -70,17 +83,42 @@ class Cli(private val paths: AgentPaths, private val copyq: CopyQ) {
         return 0
     }
 
+    /** What status can say without the store or the keyring (works in a bare container). */
+    private fun dryRunStatus(): Int {
+        println("data dir: ${paths.dataDir} (store ${if (paths.database.exists()) "present" else "not created yet"})")
+        println("socket: ${paths.socket} (daemon ${if (sendToDaemon(paths.socket, AgentRequest(Commands.PING, emptyMap(), ByteArray(0))) == "pong") "running" else "not running"})")
+        println("capture: ${captureModeOf(copyq, gnomeRegistered = false).label}")
+        println("copyq: ${if (!copyq.installed()) "not installed" else if (copyq.running()) "running" else "not running"}")
+        println("launcher: ${agentBinary() ?: "not running from the installed launcher"}")
+        return 0
+    }
+
+    private fun checkEncryption(): Int = when (copyq.tabsEncrypted()) {
+        true -> println("copyq: tabs encrypted").let { 0 }
+        false -> println("copyq: tabs unencrypted\n\n$ENCRYPTION_ADVICE\n\nOr let the agent do it: clipvault-agent install-copyq --encrypt").let { 1 }
+        null -> fail("CopyQ is not running (or too old to report tab encryption).")
+    }
+
+    private fun encrypt(): Int {
+        val keyring = SecretServiceKeyring.detect() ?: return fail("Needs a Secret Service keyring to keep CopyQ's password.")
+        val restarter = CopyqRestarter(copyq) { CopyqRestarter.serverEnvironment(copyq.session) }
+        return runCatching { println(CopyqEncryption(copyq, keyring, restarter).enable()) }
+            .fold({ 0 }, { fail("Encryption not finished: ${it.message}") })
+    }
+
     private fun config(args: List<String>): Int {
         val state = local().state
         when (args.getOrNull(0)) {
             null -> Unit
             "promote_to_clipboard" -> state.promoteToClipboard = args.getOrNull(1) == "on"
+            "scrub_copyq_sensitive" -> state.scrubSensitive = args.getOrNull(1) != "off"
             "copyq_tab" -> state.copyqTab = args.getOrNull(1)?.takeUnless { it == "default" }
             "exclude" -> state.excludedTitles += args.getOrNull(1) ?: return usage()
             "unexclude" -> state.excludedTitles -= args.getOrNull(1) ?: return usage()
             else -> return usage()
         }
         println("promote_to_clipboard=${if (state.promoteToClipboard) "on" else "off"}")
+        println("scrub_copyq_sensitive=${if (state.scrubSensitive) "on" else "off"}")
         println("copyq_tab=${state.copyqTab ?: "default (CopyQ clipboard tab)"}")
         println("exclusions=${state.excludedTitles.joinToString(", ").ifEmpty { "none" }}")
         return 0

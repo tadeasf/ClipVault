@@ -43,6 +43,8 @@ object SystemdUnit {
         |ExecStart="$agentBinary" run
         |Restart=on-failure
         |RestartSec=5
+        |# SIGTERM ends the JVM with 143; that is a clean stop, not a failure.
+        |SuccessExitStatus=143
         |
         |[Install]
         |WantedBy=graphical-session.target
@@ -66,6 +68,8 @@ object SystemdUnit {
 /** Shown by `install-copyq` while CopyQ keeps its tabs in plaintext. */
 const val ENCRYPTION_ADVICE = """CopyQ stores its tabs unencrypted, so clips in its history (including phone clips the
 agent writes there) are plaintext on disk. ClipVault's own store is encrypted either way.
-To encrypt CopyQ's tabs: CopyQ > Preferences > History (or General, depending on version) >
-check "Encrypt tabs", set a password, and keep "Use external key store" on so GNOME Keyring /
-KWallet unlocks it at login. Then `clipvault-agent status` shows "copyq: tabs encrypted"."""
+To encrypt CopyQ's tabs yourself:
+  1. CopyQ > Preferences > General: check "Encrypt tabs".
+  2. Set a password when CopyQ asks.
+  3. Keep "Use external key store" checked, so GNOME Keyring / KWallet unlocks it at login.
+Then `clipvault-agent status` shows "copyq: tabs encrypted"."""

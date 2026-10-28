@@ -22,6 +22,11 @@ class AgentState(private val db: ClipDatabase) {
         get() = get(PROMOTE) == "true"
         set(value) = put(PROMOTE, value.toString())
 
+    /** Remove sensitive clips from CopyQ as soon as they are classified (default on). */
+    var scrubSensitive: Boolean
+        get() = get(SCRUB) != "false"
+        set(value) = put(SCRUB, value.toString())
+
     /** Null means "CopyQ's own clipboard tab" (`copyq config clipboard_tab`). */
     var copyqTab: String?
         get() = get(TAB)?.ifEmpty { null }
@@ -53,6 +58,7 @@ class AgentState(private val db: ClipDatabase) {
 
     private companion object {
         const val PROMOTE = "agent.promoteToClipboard"
+        const val SCRUB = "agent.scrubCopyqSensitive"
         const val TAB = "agent.copyqTab"
         const val EXCLUDE = "agent.excludedTitles"
         const val OUTBOX = "agent.copyqOutbox"

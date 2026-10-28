@@ -399,7 +399,10 @@ The brief's steps 0-9 stay as given. Adjustments:
 - **Step 6:** `docs/sync/handshake.md` is written and reviewed before any handshake code.
 - **Step 7:** transport and discovery, plus the agent's sync loop.
 - **Step 8:** the sync UI on Android, plus a small Compose desktop window for pairing and status.
-- **Step 9:** hardening. Desktop packaging already landed in step 4.
+- **Step 9:** hardening. Desktop packaging already landed in step 4. Also our own GNOME Shell
+  extension (about 100 lines of GJS) that exposes the focused window's app ID over D-Bus, so
+  per-app exclusions work on GNOME Wayland (decided 2026-10-28; until then they are unavailable
+  there, 11.6).
 
 ## 8. Decisions (answered 2026-10-28)
 
@@ -658,4 +661,42 @@ with a clear message, because a headless daemon has nowhere to ask.
 `excludedPackages` matches the window title CopyQ reports, a case-insensitive substring per
 entry. On GNOME Wayland there is no title, so exclusions are inert there (6.4).
 `clipvault-agent config exclude "KeePassXC"` adds one. The built-in password-manager titles
-(`KnownSensitiveSources`) still apply where a title exists.
+(`KnownSensitiveSources`) still apply where a title exists. On GNOME they are documented as
+unavailable until the step 9 extension reports the focused app ID.
+
+### 11.7 Sensitive clips and CopyQ (decided 2026-10-28)
+Same rule as Android: sensitive clips are stored hidden in ClipVault and expire after 2 minutes.
+CopyQ stores a clip before ClipVault sees it, so with `scrub_copyq_sensitive` (Setting
+`agent.scrubCopyqSensitive`, default on):
+
+- The agent answers the CopyQ command with `... scrub` for sensitive and password-manager clips.
+  The command is installed first in CopyQ's list and calls `ignore()` on that answer, so the clip
+  never reaches the tab and later automatic commands (e.g. an archive command) skip it.
+- Backstop for clips that arrive by the GNOME D-Bus path or a slow command: the agent runs
+  `removeNewestIfHash(tab, sha256)` at 1, 2 and 5 s. The hash comparison runs inside CopyQ
+  (`sha256sum(read(0))`), so the agent never reads a row. Only the newest row; no retroactive scan.
+
+### 11.8 CopyQ tab encryption without the dialog
+Verified against CopyQ 17.0.0 source (`src/common/keychainaccess.cpp`) and a rehearsal on this
+machine: CopyQ takes the password from `COPYQ_PASSWORD` in the server's
+environment and, with `use_key_store=true`, saves it through QtKeychain. The libsecret backend
+stores it as an `org.qt.keychain` item with attributes `server=com.github.hluk.copyq`,
+`user=Password` (or `PasswordForSession-<name>` for `copyq -s NAME`), label
+`<user>@com.github.hluk.copyq`. Encrypted data: `kek_salt.dat` and `wrapped_dek.dat` next to the
+tab files.
+
+`install-copyq --encrypt` (`CopyqEncryption`): count items over all tabs; generate a random
+32-byte password and keep a backup in the keyring (`cz.tadeasf.clipvault` /
+`copyq-tab-password[-session]`), verifying the read-back; restart CopyQ with `COPYQ_PASSWORD`
+and its original environment; `config encrypt_tabs true`; restart without the variable; require
+encryption on and the same item count. Rehearsed on a throwaway offscreen session (`-s cvenc`,
+own settings dir): 3 of 3 items before and after, and a cold start without the variable still
+opened all 3, so the key came from the keyring.
+
+The systemd unit sets `SuccessExitStatus=143`: SIGTERM ends the JVM with 143, which is a clean
+stop, not a failure.
+
+### 11.9 Privacy rule for testing (from 2026-10-28, all future steps)
+Never read rows from the user's CopyQ tabs, ClipVault store or clipboard. Tests that need real
+data flow use a CopyQ tab `clipvault-test` that the test creates, fills with generated content and
+deletes. Aggregate counts (`status`) are fine.

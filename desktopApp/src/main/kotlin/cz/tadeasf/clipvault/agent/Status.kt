@@ -49,5 +49,6 @@ private fun StringBuilder.appendCopyq(core: AgentCore, copyq: CopyQ) {
         }
     }
     appendLine("promote_to_clipboard: ${if (state.promoteToClipboard) "on" else "off"}")
+    appendLine("scrub_copyq_sensitive: ${if (state.scrubSensitive) "on" else "off"}")
     appendLine("copyq outbox: ${state.outbox().size} waiting")
 }

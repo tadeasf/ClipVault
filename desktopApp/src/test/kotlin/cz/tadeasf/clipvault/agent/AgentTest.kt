@@ -23,7 +23,7 @@ class AgentTest {
     private val db = clipDatabase(JvmDriverFactory(File(dir, "history.db")).open(Random.nextBytes(32)))
     private val core = AgentCore(db, fake.copyq(), { time }, Dispatchers.Unconfined)
 
-    private suspend fun ingest(text: String, title: String? = null) = core.ingest(IngestRequest(text.encodeToByteArray(), title))
+    private suspend fun ingest(text: String, title: String? = null) = core.ingest(IngestRequest(text.encodeToByteArray(), title)).outcome
 
     private suspend fun storedCount() = core.repository.counts().first().total
 
@@ -64,8 +64,8 @@ class AgentTest {
         assertEquals(Outcome.DUPLICATE, ingest("same"))
         assertEquals(Outcome.BLANK, ingest(""))
         assertEquals(Outcome.BLANK, ingest("  \n "))
-        assertEquals(Outcome.NON_TEXT, core.ingest(IngestRequest(byteArrayOf(0xff.toByte(), 0xfe.toByte(), 0x41))))
-        assertEquals(Outcome.NON_TEXT, core.ingest(IngestRequest(ByteArray(0), nonText = true)))
+        assertEquals(Outcome.NON_TEXT, core.ingest(IngestRequest(byteArrayOf(0xff.toByte(), 0xfe.toByte(), 0x41))).outcome)
+        assertEquals(Outcome.NON_TEXT, core.ingest(IngestRequest(ByteArray(0), nonText = true)).outcome)
         assertEquals(1, storedCount())
         assertEquals(2, core.state.count(Outcome.NON_TEXT))
     }
@@ -142,9 +142,11 @@ class AgentTest {
             val daemon = launch(Dispatchers.IO) { runDaemon(core, fake.copyq(), paths, gnome = null) }
             delay(500)
             assertEquals("pong", sendToDaemon(paths.socket, AgentRequest(Commands.PING, emptyMap(), ByteArray(0))))
-            assertEquals(round.toLong(), storedCount()) // a restart adds nothing on its own
+            assertEquals(2L * round, storedCount()) // a restart adds nothing on its own (each round stores 2)
             val answer = sendToDaemon(paths.socket, AgentRequest(Commands.INGEST, mapOf("title" to "Ünïcode window"), "via socket $round".encodeToByteArray()))
             assertEquals("stored", answer)
+            val otp = sendToDaemon(paths.socket, AgentRequest(Commands.INGEST, mapOf("title" to "Ünïcode window"), "48392$round".encodeToByteArray()))
+            assertEquals("stored_sensitive scrub", otp) // tells the CopyQ command to ignore() it
             assertContains(sendToDaemon(paths.socket, AgentRequest(Commands.STATUS, emptyMap(), ByteArray(0)))!!, "daemon: running")
             daemon.cancelAndJoin()
         }
@@ -175,4 +177,46 @@ class AgentTest {
         assertContains(script, """\"/opt/clipvault agent/bin/clipvault-agent\"""") // path quoted inside the command string
         assertEquals("\"a\\\"b\\\\c\\n\"", jsString("a\"b\\c\n"))
     }
+
+    // Scrub
+
+    @Test
+    fun sensitiveClipsAreFlaggedForScrubbingUnlessDisabled() = runBlocking {
+        val scrubbed = mutableListOf<String>()
+        core.onSensitive = { scrubbed += it }
+        val otp = core.ingest(IngestRequest("483920".encodeToByteArray()))
+        assertEquals("stored_sensitive scrub", otp.reply(core.state.scrubSensitive))
+        val manager = core.ingest(IngestRequest("hunter2".encodeToByteArray(), "Vault - KeePassXC"))
+        assertEquals("sensitive_source scrub", manager.reply(core.state.scrubSensitive))
+        assertEquals("stored", core.ingest(IngestRequest("plain".encodeToByteArray())).reply(true))
+        assertEquals(2, scrubbed.size)
+        assertEquals(cz.tadeasf.clipvault.security.sha256Hex("483920"), scrubbed.first())
+
+        core.state.scrubSensitive = false
+        assertEquals("stored_sensitive", core.ingest(IngestRequest("771204".encodeToByteArray())).reply(core.state.scrubSensitive))
+        assertEquals(2, scrubbed.size)
+    }
+
+    @Test
+    fun removeNewestComparesHashesInsideCopyq() {
+        assertEquals(false, fake.copyq().removeNewestIfHash("&clipboard", "abc123"))
+        val script = fake.stdins().last()
+        assertContains(script, "sha256sum(read(0))")
+        assertContains(script, "\"abc123\"")
+        assertContains(script, "remove(0)")
+    }
+
+    @Test
+    fun installedCommandGoesFirstAndHonoursScrub() {
+        val script = installScript("/opt/clipvault-agent/bin/clipvault-agent")
+        assertContains(script, "cmds.unshift(")
+        assertContains(script, "indexOf(\\\"scrub\\\") >= 0) ignore();")
+    }
+
+    @Test
+    fun sessionSwitchIsPassedToEveryCall() {
+        assertEquals(listOf("copyq", "-s", "cvtest", "eval", "-"), CopyQ("copyq", session = "cvtest").command(listOf("eval", "-")))
+        assertEquals(listOf("copyq", "exit"), CopyQ("copyq").command(listOf("exit")))
+    }
+
 }

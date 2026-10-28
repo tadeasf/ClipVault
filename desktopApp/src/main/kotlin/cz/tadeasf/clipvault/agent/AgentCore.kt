@@ -17,6 +17,12 @@ import kotlinx.coroutines.Dispatchers
 /** One clipboard item handed over by CopyQ (or the GNOME extension). */
 class IngestRequest(val bytes: ByteArray, val title: String? = null, val nonText: Boolean = false)
 
+/** What one ingest did, and whether the clip was sensitive (so CopyQ should drop it). */
+data class Ingested(val outcome: Outcome, val sensitive: Boolean) {
+    /** The answer the CopyQ command parses: "scrub" makes it call ignore(). */
+    fun reply(scrub: Boolean): String = outcome.name.lowercase() + if (scrub && sensitive) " scrub" else ""
+}
+
 /** Result of one CopyQ outbox flush. */
 data class Flush(val written: Int, val skipped: Int, val backlog: Int, val copyqReachable: Boolean)
 
@@ -38,20 +44,26 @@ class AgentCore(
     /** Content hashes this agent put on the live clipboard, with when; a re-capture of them is an echo. */
     private val promoted = ConcurrentHashMap<String, Long>()
 
-    suspend fun ingest(request: IngestRequest): Outcome {
-        val outcome = classify(request)
-        state.record(outcome, request.title, now())
-        return outcome
+    /** Called with the clip's SHA-256 when a sensitive clip should be removed from CopyQ (daemon only). */
+    var onSensitive: ((String) -> Unit)? = null
+
+    suspend fun ingest(request: IngestRequest): Ingested {
+        val ingested = classify(request)
+        state.record(ingested.outcome, request.title, now())
+        if (ingested.sensitive && state.scrubSensitive) onSensitive?.invoke(sha256Hex(request.bytes.decodeToString()))
+        return ingested
     }
 
-    private suspend fun classify(request: IngestRequest): Outcome {
-        if (request.nonText) return Outcome.NON_TEXT
+    private suspend fun classify(request: IngestRequest): Ingested {
+        if (request.nonText) return Ingested(Outcome.NON_TEXT, sensitive = false)
         val text = runCatching { request.bytes.decodeToString(throwOnInvalidSequence = true) }.getOrNull()
-            ?: return Outcome.NON_TEXT
-        if (isEcho(text)) return Outcome.ECHO
+            ?: return Ingested(Outcome.NON_TEXT, sensitive = false)
+        if (isEcho(text)) return Ingested(Outcome.ECHO, sensitive = false)
         val result = ingest.ingest(text, ClipHints(sourceWindowTitle = request.title))
         applyRetention()
-        return result.toOutcome()
+        val sensitive = (result as? IngestResult.Stored)?.sensitive == true ||
+            (result as? IngestResult.Skipped)?.reason == SkipReason.SENSITIVE_SOURCE
+        return Ingested(result.toOutcome(), sensitive)
     }
 
     private fun isEcho(text: String): Boolean {
