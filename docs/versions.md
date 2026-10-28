@@ -31,4 +31,4 @@ where it was verified (2026-10-28). Update both together.
 | Kover | 0.9.11 | https://github.com/Kotlin/kotlinx-kover (2026-09-29) | host-JVM tests only |
 
 Added in later steps (verified in `docs/design.md` section 4, pinned when first used):
-Ktor 3.6.0, Tink 1.24.0, JmDNS 3.6.4, zxing core 3.5.4.
+Ktor 3.6.0, JmDNS 3.6.4, zxing core 3.5.4. (Tink 1.24.0 was planned and dropped on 2026-10-28: BouncyCastle 1.86 provides every primitive, see docs/sync/handshake.md section 2.)
