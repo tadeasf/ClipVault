@@ -1,6 +1,7 @@
 package cz.tadeasf.clipvault.agent
 
 import kotlin.system.exitProcess
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 
 private const val USAGE = """Usage: clipvault-agent [--session NAME] <command>
@@ -16,6 +17,8 @@ private const val USAGE = """Usage: clipvault-agent [--session NAME] <command>
   pair                        pair a phone: show a QR code (2 minutes, one use)
   pair --code                 pair another desktop: show a 6-digit code
   pair --join [--addr H:P]    pair with a desktop showing a code (found by mDNS, or at H:P)
+  peers                       paired devices and their sync state
+  unpair NAME|ID              unpair a device (by name or device id prefix)
                               pair options: --listen ADDR (address to use), --name NAME
   config [KEY [VALUE]]        promote_to_clipboard on|off, scrub_copyq_sensitive on|off,
                               copyq_tab NAME|default, exclude TITLE, unexclude TITLE
@@ -36,7 +39,11 @@ fun main(args: Array<String>) {
 class Cli(private val paths: AgentPaths, private val copyq: CopyQ) {
 
     suspend fun run(args: List<String>): Int = when (args.firstOrNull()) {
-        "run" -> runDaemon(AgentCore(openStore(paths), copyq), copyq, paths, GnomeFallback()).let { 0 }
+        "run" -> openStores(paths).let { (clips, sync) ->
+            // Unconfined: store writes run on the caller's thread, so inside SyncNode.write { } they never
+            // suspend and can't interleave with applies (step 7).
+            runDaemon(AgentCore(clips, copyq, io = Dispatchers.Unconfined), copyq, paths, GnomeFallback(), sync)
+        }.let { 0 }
         "status" -> if ("--dry-run" in args) dryRunStatus() else status()
         "ingest" -> ingest(args.drop(1), System.`in`.readBytes())
         "push-test" -> args.getOrNull(1)?.let { push(it) } ?: usage()
@@ -47,6 +54,8 @@ class Cli(private val paths: AgentPaths, private val copyq: CopyQ) {
         "install-service" -> agentBinary()?.let { SystemdUnit.install(it) } ?: noLauncher()
         "config" -> config(args.drop(1))
         "pair" -> PairCommand(paths).run(args.drop(1))
+        "peers" -> peers()
+        "unpair" -> args.getOrNull(1)?.let { unpair(it) } ?: usage()
         "--help", "-h", "help" -> println(USAGE).let { 0 }
         else -> usage()
     }
@@ -122,6 +131,26 @@ class Cli(private val paths: AgentPaths, private val copyq: CopyQ) {
         println("copyq_tab=${state.copyqTab ?: "default (CopyQ clipboard tab)"}")
         println("exclusions=${state.excludedTitles.joinToString(", ").ifEmpty { "none" }}")
         return 0
+    }
+
+    private fun peers(): Int {
+        val answer = sendToDaemon(paths.socket, AgentRequest(Commands.PEERS, emptyMap(), ByteArray(0)))
+            ?: offlinePeers().let { peerLines(it.peers.peers(), emptyList()).joinToString("\n").ifEmpty { "no paired devices" } }
+        println(answer)
+        return 0
+    }
+
+    private suspend fun unpair(nameOrId: String): Int {
+        val answer = sendToDaemon(paths.socket, AgentRequest(Commands.UNPAIR, emptyMap(), nameOrId.encodeToByteArray()))
+            ?: offlinePeers().let { host -> unpairReply(host, nameOrId) }
+        println(answer)
+        return if (answer.startsWith("error")) 1 else 0
+    }
+
+    /** No daemon: the stores opened here; unpair then leaves a pending revoke (no live connection). */
+    private fun offlinePeers(): SyncHost {
+        val (clips, sync) = openStores(paths)
+        return SyncHost(clips, sync!!, AgentCore(clips, copyq), kotlinx.coroutines.GlobalScope)
     }
 
     private var core: AgentCore? = null

@@ -7,6 +7,7 @@ import cz.tadeasf.clipvault.model.MetaField
 import cz.tadeasf.clipvault.security.sha256Hex
 import cz.tadeasf.clipvault.sync.db.SyncDatabase
 import cz.tadeasf.clipvault.sync.wire.ClipCreated
+import cz.tadeasf.clipvault.sync.wire.HARD_MAX_PAYLOAD
 import cz.tadeasf.clipvault.sync.wire.MetaChanged
 import cz.tadeasf.clipvault.sync.wire.SyncEvent
 
@@ -41,6 +42,7 @@ class SyncApplier(private val db: ClipDatabase, private val syncDb: SyncDatabase
     }
 
     private fun fill(clipId: String, bytes: ByteArray): Boolean {
+        if (bytes.size > HARD_MAX_PAYLOAD) return false
         val clip = clips.selectById(clipId).executeAsOneOrNull() ?: return false
         val content = bytes.decodeToString() // step 6: decrypt first
         if (clip.content.isNotEmpty() || clip.contentHash.isEmpty() || sha256Hex(content) != clip.contentHash) return false
@@ -58,7 +60,7 @@ class SyncApplier(private val db: ClipDatabase, private val syncDb: SyncDatabase
             return seq
         }
         // A payload that doesn't match its hash is dropped; the row waits for a fetch like an over-cap one.
-        val content = event.payload?.decodeToString()?.takeIf { sha256Hex(it) == event.contentHash }
+        val content = event.payload?.takeIf { it.size <= HARD_MAX_PAYLOAD }?.decodeToString()?.takeIf { sha256Hex(it) == event.contentHash }
         val categories = categoriesOf(event.categories)
         val seq = log.nextSeq()
         val live = event.contentHash.takeIf { it.isNotEmpty() }?.let { clips.findLiveByHash(it).executeAsOneOrNull() }

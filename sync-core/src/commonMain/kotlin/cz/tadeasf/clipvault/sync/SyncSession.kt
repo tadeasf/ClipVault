@@ -6,6 +6,7 @@ import cz.tadeasf.clipvault.sync.wire.Bye
 import cz.tadeasf.clipvault.sync.wire.CatchUpBatch
 import cz.tadeasf.clipvault.sync.wire.CatchUpRequest
 import cz.tadeasf.clipvault.sync.wire.FetchPayload
+import cz.tadeasf.clipvault.sync.wire.HARD_MAX_PAYLOAD
 import cz.tadeasf.clipvault.sync.wire.Hello
 import cz.tadeasf.clipvault.sync.wire.Message
 import cz.tadeasf.clipvault.sync.wire.Payload
@@ -18,7 +19,7 @@ import cz.tadeasf.clipvault.sync.wire.WireCodec
  * pulls the other's log page by page, and once a side has served the last page it pushes new events.
  */
 class SyncSession internal constructor(
-    private val node: SyncNode,
+    private val node: SyncEngine,
     private val transmit: (Message) -> Unit,
     private val expectedPeerDeviceId: String?,
 ) {
@@ -37,15 +38,44 @@ class SyncSession internal constructor(
     private var rescan: Set<SensitiveCategory>? = null
     private var rescanning = false
 
-    internal fun start() = node.config.let { send(Hello(it.deviceId, it.sensitiveOptIn.names(), it.maxPayloadBytes)) }
+    /** Receiver side: the normal catch-up from this peer has finished (later events arrive as Push). */
+    var caughtUp = false
+        private set
+
+    /** Events received from this peer in batches and pushes (duplicates included). */
+    var eventsReceived = 0L
+        private set
+
+    // FetchPayload: at most MAX_FETCHES in flight per peer; the rest wait here.
+    private var fetchesInFlight = 0
+    private val fetchQueue = ArrayDeque<String>()
+
+    /** The opt-ins this session announced; a later settings change applies from the next session on. */
+    private val optIns = node.config.sensitiveOptIn
+
+    internal fun start() = node.config.let {
+        send(Hello(it.deviceId, optIns.names(), minOf(it.maxPayloadBytes, HARD_MAX_PAYLOAD), it.syncEnabledAt.takeIf { at -> at > 0 }))
+    }
 
     /** One decoded message from the peer; envelope numbering and versions are the transport's job. */
     fun receive(message: Message) {
         if (!closed) handle(message)
     }
 
-    /** Asks the peer for an over-cap clip's content. */
-    fun fetch(clipId: String) = send(FetchPayload(clipId))
+    /** Asks the peer for an over-cap clip's content; at most [MAX_FETCHES] at a time, the rest queue. */
+    fun fetch(clipId: String) {
+        if (fetchesInFlight < MAX_FETCHES) {
+            fetchesInFlight++
+            send(FetchPayload(clipId))
+        } else {
+            fetchQueue.addLast(clipId)
+        }
+    }
+
+    private fun fetched() {
+        fetchesInFlight = maxOf(0, fetchesInFlight - 1)
+        fetchQueue.removeFirstOrNull()?.let(::fetch)
+    }
 
     fun close(reason: String? = null) {
         if (closed) return
@@ -72,18 +102,21 @@ class SyncSession internal constructor(
         when (message) {
             is CatchUpRequest -> serve(message, peer)
             is CatchUpBatch -> {
-                message.events.forEach { node.applier.apply(it, peer.deviceId) }
+                message.events.forEach { received(it, peer) }
                 if (!rescanning) node.advance(peer.deviceId, message.throughSeq) // a re-scan skips events, so it never moves the cursor
                 send(Ack(message.throughSeq))
                 nextRequest(message, peer)
                 node.changed()
             }
             is Push -> {
-                received(message.event, peer)
+                pushed(message.event, peer)
                 node.changed()
             }
             is FetchPayload -> send(Payload(message.clipId, node.log.payload(message.clipId, peer)))
-            is Payload -> message.bytes?.let { node.applier.fillPayload(message.clipId, it) }
+            is Payload -> {
+                message.bytes?.takeIf { it.size <= HARD_MAX_PAYLOAD }?.let { node.applier.fillPayload(message.clipId, it) }
+                fetched()
+            }
             else -> Unit // Ack is informational; pairing and revoke messages belong to the secure connection
         }
     }
@@ -94,7 +127,7 @@ class SyncSession internal constructor(
         }
         peer = message
         val (cursor, optInsThen) = node.cursor(message.deviceId)
-        rescan = (node.config.sensitiveOptIn - optInsThen).ifEmpty { null }
+        rescan = (optIns - optInsThen).ifEmpty { null }
         send(CatchUpRequest(cursor))
     }
 
@@ -112,24 +145,36 @@ class SyncSession internal constructor(
         when {
             batch.hasMore -> send(CatchUpRequest(batch.throughSeq, rescan?.takeIf { rescanning }?.names()))
             !rescanning && rescan != null -> {
+                caughtUp = true
                 rescanning = true
                 send(CatchUpRequest(0, rescan.names()))
             }
             else -> {
                 rescanning = false
                 this.rescan = null
-                node.rememberOptIns(peer.deviceId)
+                caughtUp = true
+                node.rememberOptIns(peer.deviceId, optIns)
             }
         }
     }
 
+    /** Applies one event; the cursor advances only together with the Ack, after the apply is durable. */
     private fun received(event: SyncEvent, peer: Hello) {
-        node.applier.apply(event, peer.deviceId)
+        eventsReceived++
+        node.applied(event, node.applier.apply(event, peer.deviceId))
+    }
+
+    private fun pushed(event: SyncEvent, peer: Hello) {
+        received(event, peer)
         node.advance(peer.deviceId, event.seq) // pushes come in seq order; skipped seqs were filtered for us
         send(Ack(event.seq))
     }
 
     private fun send(message: Message) {
         if (!closed) transmit(message)
+    }
+
+    companion object {
+        const val MAX_FETCHES = 2
     }
 }

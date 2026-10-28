@@ -50,7 +50,9 @@ CREATE TABLE PeerIdentity (
   publicKey BLOB NOT NULL PRIMARY KEY,
   name TEXT NOT NULL,
   firstSeen INTEGER NOT NULL,
-  lastSeen INTEGER NOT NULL
+  lastSeen INTEGER NOT NULL,
+  -- host:port this device last reached the peer at (step 7 reconnects try it when mDNS has nothing).
+  lastAddress TEXT
 );
 
 -- Unpaired while unreachable: a connection from it may only receive Revoke (pairing.md section 4).
@@ -94,3 +96,6 @@ INSERT OR REPLACE INTO PendingRevoke(publicKey, until) VALUES (?, ?);
 
 deletePendingRevoke:
 DELETE FROM PendingRevoke WHERE publicKey = ?;
+
+setAddress:
+UPDATE PeerIdentity SET lastAddress = :address WHERE publicKey = :publicKey;

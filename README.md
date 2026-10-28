@@ -45,6 +45,9 @@ clipvault-agent status
   is the case. ClipVault never changes CopyQ's encryption: `clipvault-agent install-copyq
   --check-encryption` only reports it (exit 1 while off) and prints how to turn it on in CopyQ's
   Preferences, with a password you choose.
+- **Sync status:** `clipvault-agent status` shows a line per paired device (state, last seen,
+  cursor, frames, last error). `clipvault-agent peers` lists them, and `clipvault-agent unpair
+  NAME|ID` unpairs one (over a live connection the other side is told at once).
 - **No keyring:** `CLIPVAULT_KEYRING=none` makes the agent use the passphrase-protected key file
   and never contact a Secret Service. That needs a terminal for the passphrase.
 - **Lost keyring:** if the store's key is gone (for example, the keyring was replaced), the

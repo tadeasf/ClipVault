@@ -5,7 +5,7 @@ import cz.tadeasf.clipvault.sync.crypto.Crypto
 import cz.tadeasf.clipvault.sync.db.SyncDatabase
 import cz.tadeasf.clipvault.sync.secure.LocalIdentity
 
-class Peer(val publicKey: ByteArray, val name: String, val firstSeen: Long, val lastSeen: Long, val deviceId: String)
+class Peer(val publicKey: ByteArray, val name: String, val firstSeen: Long, val lastSeen: Long, val deviceId: String, val lastAddress: String? = null)
 
 /**
  * This device's identity and its paired peers, in the encrypted SyncDatabase (pairing.md sections 3
@@ -16,7 +16,7 @@ class PeerStore(private val db: SyncDatabase, private val c: Crypto, internal va
 
     fun identity(): LocalIdentity? = q.identity().executeAsOneOrNull()?.let { LocalIdentity(it, c) }
 
-    fun peers(): List<Peer> = q.peers().executeAsList().map { Peer(it.publicKey, it.name, it.firstSeen, it.lastSeen, deviceIdOf(c, it.publicKey)) }
+    fun peers(): List<Peer> = q.peers().executeAsList().map { Peer(it.publicKey, it.name, it.firstSeen, it.lastSeen, deviceIdOf(c, it.publicKey), it.lastAddress) }
 
     fun peer(publicKey: ByteArray): Peer? = peers().firstOrNull { it.publicKey.contentEquals(publicKey) }
 
@@ -38,6 +38,8 @@ class PeerStore(private val db: SyncDatabase, private val c: Crypto, internal va
     }
 
     fun seen(publicKey: ByteArray) = q.seenPeer(now(), publicKey)
+
+    fun reachedAt(publicKey: ByteArray, address: String) = q.setAddress(address, publicKey)
 
     /** Local and immediate. Without a live session to send Revoke on, it waits 30 days for the peer to call. */
     fun unpair(publicKey: ByteArray, revokeDelivered: Boolean) = db.transaction {

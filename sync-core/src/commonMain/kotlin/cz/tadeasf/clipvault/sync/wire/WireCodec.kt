@@ -48,6 +48,7 @@ object WireCodec {
     private val TYPES = setOf(
         "hello", "catchup_request", "catchup_batch", "push", "ack", "fetch_payload", "payload", "bye",
         "identity", "pair_confirm", "revoke", // 1.1
+        "ping", "pong", // 1.2
     )
 
     /** The same names as the classes' @SerialName (checked by WireTest). */
@@ -63,5 +64,7 @@ object WireCodec {
         is Identity -> "identity"
         is PairConfirm -> "pair_confirm"
         is Revoke -> "revoke"
+        is Ping -> "ping"
+        is Pong -> "pong"
     }
 }

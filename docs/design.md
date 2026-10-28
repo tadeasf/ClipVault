@@ -444,10 +444,24 @@ The brief's steps 0-9 stay as given. Adjustments:
       resolved. Plain JmDNS on this machine found nothing in 3 s, then found the service on the next
       call. `--join` therefore browses in 2 s rounds for up to 10 s.
     - **Firewall:** Fedora's `FedoraWorkstation` firewalld zone opens TCP and UDP 1025-65535 but not
-      the `mdns` service (UDP 5353); the user allowed it. Not tested: discovery with mDNS blocked
-      after the timing fix. Step 7 should detect a blocked mDNS for discovery, say so in `status`,
-      and point to `--addr`. The app never changes the firewall itself (section 12).
-- **Step 7:** transport and discovery, plus the agent's sync loop.
+      the `mdns` service (UDP 5353); the user allowed it.
+    - **Tested with mDNS removed from the runtime zone:** two instances on *one* machine still
+      found each other (7.3 s), because multicast looped back on the same host doesn't pass the
+      zone's input rules. A blocked mDNS can only be shown across two machines.
+    - **The "nothing found" message:** `--join` with no device advertising prints, after 10 s,
+      that nothing was found, that mDNS may be blocked (UDP 5353), and the `--addr HOST:PORT`
+      fallback; exit 1.
+    - The app never changes the firewall itself (section 12).
+- **Step 7:** transport and discovery, plus the agent's sync loop. Built as `SyncNode` (protocol.md
+  section 15). Choices:
+  - **Network changes:** interfaces are polled every 10 s, and the listener is rebound when the
+    set of site-local addresses changes. NetworkManager's D-Bus signal would be faster but adds a
+    second D-Bus integration; polling is enough for a LAN sync.
+  - **Agent:** the daemon starts the node once sync is enabled and a device is paired (`pair` may
+    do both while it runs). Local writes go through the node's dispatcher. Clips received from
+    peers are queued for CopyQ like phone clips.
+  - **New commands:** `status` gains a line per peer; there are new `peers` and `unpair NAME|ID`
+    commands.
   - **Required:** each `SyncNode` runs on one single-threaded dispatcher. A
     convergence-under-concurrency test (local writes, received events and several live sessions
     on real threads) must pass before step 7 is done.

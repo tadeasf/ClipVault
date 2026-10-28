@@ -53,6 +53,8 @@ kotlin {
         }
         commonMain.dependencies {
             implementation(project(":shared"))
+            // SyncNode: one single-threaded dispatcher per device, socket I/O off it (step 7).
+            implementation(libs.kotlinx.coroutinesCore)
             // Wire format (docs/sync/protocol.md section 2); JSON only for debug output.
             implementation(libs.kotlinx.serializationCbor)
             implementation(libs.kotlinx.serializationJson)

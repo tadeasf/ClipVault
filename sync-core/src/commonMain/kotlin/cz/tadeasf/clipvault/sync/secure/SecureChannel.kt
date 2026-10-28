@@ -30,6 +30,11 @@ class SecureChannel internal constructor(
 
     val expired: Boolean get() = now() - startedAt >= MAX_AGE_MILLIS
 
+    val ageMillis: Long get() = now() - startedAt
+
+    /** Frames this side may still seal before the 2^32 limit. */
+    val sendsLeft: Long get() = MAX_COUNTER - 1 - sent
+
     fun seal(plaintext: ByteArray): ByteArray {
         val counter = sent + 1
         if (counter >= MAX_COUNTER) throw ChannelClosed("send counter reached 2^32")

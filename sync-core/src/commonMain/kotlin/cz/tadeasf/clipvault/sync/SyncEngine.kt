@@ -4,7 +4,9 @@ import cz.tadeasf.clipvault.db.ClipDatabase
 import cz.tadeasf.clipvault.detect.SensitiveCategory
 import cz.tadeasf.clipvault.sync.db.SyncDatabase
 import cz.tadeasf.clipvault.sync.wire.DEFAULT_MAX_PAYLOAD
+import cz.tadeasf.clipvault.sync.wire.ClipCreated
 import cz.tadeasf.clipvault.sync.wire.Message
+import cz.tadeasf.clipvault.sync.wire.SyncEvent
 
 /** Per-device sync settings. [sensitiveOptIn] is what this device accepts from peers; it is sent in Hello. */
 data class SyncConfig(
@@ -24,7 +26,7 @@ data class SyncConfig(
  * with; the secure connection (or a test bus) does the envelope encoding.
  * Not thread-safe; step 7 drives each node from one single-threaded dispatcher.
  */
-class SyncNode(db: ClipDatabase, private val syncDb: SyncDatabase, config: SyncConfig) {
+class SyncEngine(private val db: ClipDatabase, private val syncDb: SyncDatabase, config: SyncConfig) {
     /** A change (e.g. a new opt-in) takes effect at the next connect. */
     var config: SyncConfig = config
 
@@ -41,6 +43,20 @@ class SyncNode(db: ClipDatabase, private val syncDb: SyncDatabase, config: SyncC
         sessions += it
         it.start()
     }
+
+    /** Called with the row id of every clip a peer created or bumped here (the agent queues them for CopyQ). */
+    var onRemoteClip: ((clipRowId: String) -> Unit)? = null
+
+    internal fun applied(event: SyncEvent, seq: Long?) {
+        if (seq == null || event !is ClipCreated) return
+        db.clipMemberQueries.selectById(event.clipId).executeAsOneOrNull()?.let { onRemoteClip?.invoke(it.clipId) }
+    }
+
+    /** (member id, peer id) for each member of a clip row that came from a peer: where to fetch it from. */
+    internal fun originsOf(clipRowId: String): List<Pair<String, String>> =
+        db.clipMemberQueries.forClip(clipRowId).executeAsList().mapNotNull { m ->
+            syncDb.syncQueries.origin(m.seq).executeAsOneOrNull()?.let { m.id to it }
+        }
 
     /** Call after every local change and every applied event: live peers get what is new. */
     fun changed() = sessions.toList().forEach { it.pushNew() }
@@ -59,9 +75,9 @@ class SyncNode(db: ClipDatabase, private val syncDb: SyncDatabase, config: SyncC
         advance(seq, peerId)
     }
 
-    internal fun rememberOptIns(peerId: String) = syncDb.syncQueries.run {
+    internal fun rememberOptIns(peerId: String, optIns: Set<SensitiveCategory>) = syncDb.syncQueries.run {
         ensure(peerId)
-        setOptIns(config.sensitiveOptIn.map { it.name }.sorted().joinToString(","), peerId)
+        setOptIns(optIns.map { it.name }.sorted().joinToString(","), peerId)
     }
 }
 
