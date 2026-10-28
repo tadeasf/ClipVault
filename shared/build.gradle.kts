@@ -36,6 +36,7 @@ kotlin {
         commonMain.dependencies {
             api(libs.androidx.paging.common)
             implementation(libs.sqldelight.paging)
+            implementation(libs.sqldelight.coroutines)
             implementation(libs.kotlinx.coroutinesCore)
             implementation(libs.kotlinx.serializationJson)
         }

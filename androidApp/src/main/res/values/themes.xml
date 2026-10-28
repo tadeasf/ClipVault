@@ -1,0 +1,8 @@
+<resources>
+    <!-- Capture/share activities: no UI, just a window that can take focus for one clipboard read. -->
+    <style name="Theme.ClipVault.Invisible" parent="@android:style/Theme.Translucent.NoTitleBar">
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowNoDisplay">false</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
+</resources>

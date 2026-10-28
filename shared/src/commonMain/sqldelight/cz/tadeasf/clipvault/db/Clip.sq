@@ -4,7 +4,7 @@ import kotlin.Boolean;
 import kotlin.collections.Set;
 
 -- Column order matches the domain Clip constructor, so queries map with ::Clip.
--- seq and categories are last because migrations 1 and 2 add them with ALTER TABLE (which appends).
+-- seq, categories and sourcePackage are last because migrations 1-3 add them with ALTER TABLE (which appends).
 -- categories: comma-separated SensitiveCategory names, empty when the clip is not sensitive.
 CREATE TABLE Clip (
   id TEXT NOT NULL PRIMARY KEY,
@@ -18,7 +18,8 @@ CREATE TABLE Clip (
   deleted INTEGER AS Boolean NOT NULL DEFAULT 0,
   lamportClock INTEGER NOT NULL,
   seq INTEGER NOT NULL DEFAULT 0,
-  categories TEXT AS Set<SensitiveCategory> NOT NULL DEFAULT ''
+  categories TEXT AS Set<SensitiveCategory> NOT NULL DEFAULT '',
+  sourcePackage TEXT
 );
 
 CREATE INDEX clip_list ON Clip(deleted, pinned, createdAt);
@@ -64,8 +65,8 @@ currentSeq:
 SELECT value FROM SeqCounter WHERE id = 1;
 
 insert:
-INSERT INTO Clip(id, deviceId, createdAt, contentType, contentHash, content, sensitive, lamportClock, seq, categories)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO Clip(id, deviceId, createdAt, contentType, contentHash, content, sensitive, lamportClock, seq, categories, sourcePackage)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 selectById:
 SELECT * FROM Clip WHERE id = ?;
@@ -85,39 +86,53 @@ wipeContent:
 UPDATE Clip SET content = '', contentHash = '' WHERE id = ?;
 
 -- includeSensitive = 1 matches both values of `sensitive`; 0 matches only non-sensitive rows.
+-- List filters: includeSensitive = 1 matches both values of `sensitive`, 0 only non-sensitive rows;
+-- pinnedOnly = 1 keeps pinned rows only (pinned >= 1); type NULL means any content type.
 countLive:
 SELECT count(*) FROM Clip
-WHERE deleted = 0 AND (sensitive = 0 OR sensitive = :includeSensitive);
+WHERE deleted = 0 AND (sensitive = 0 OR sensitive = :includeSensitive)
+  AND pinned >= :pinnedOnly AND (:type IS NULL OR contentType = :type);
 
 page:
 SELECT * FROM Clip
 WHERE deleted = 0 AND (sensitive = 0 OR sensitive = :includeSensitive)
+  AND pinned >= :pinnedOnly AND (:type IS NULL OR contentType = :type)
 ORDER BY pinned DESC, createdAt DESC
 LIMIT :limit OFFSET :offset;
 
 countSearchTrigram:
 SELECT count(*) FROM Clip
 JOIN ClipFts ON ClipFts.rowid = Clip.rowid
-WHERE ClipFts MATCH :query AND Clip.deleted = 0 AND (Clip.sensitive = 0 OR Clip.sensitive = :includeSensitive);
+WHERE ClipFts MATCH :query AND Clip.deleted = 0 AND (Clip.sensitive = 0 OR Clip.sensitive = :includeSensitive)
+  AND Clip.pinned >= :pinnedOnly AND (:type IS NULL OR Clip.contentType = :type);
 
 searchTrigram:
 SELECT Clip.* FROM Clip
 JOIN ClipFts ON ClipFts.rowid = Clip.rowid
 WHERE ClipFts MATCH :query AND Clip.deleted = 0 AND (Clip.sensitive = 0 OR Clip.sensitive = :includeSensitive)
+  AND Clip.pinned >= :pinnedOnly AND (:type IS NULL OR Clip.contentType = :type)
 ORDER BY Clip.pinned DESC, Clip.createdAt DESC
 LIMIT :limit OFFSET :offset;
 
 countSearchPrefix:
 SELECT count(*) FROM Clip
 JOIN ClipFtsPrefix ON ClipFtsPrefix.rowid = Clip.rowid
-WHERE ClipFtsPrefix MATCH :query AND Clip.deleted = 0 AND (Clip.sensitive = 0 OR Clip.sensitive = :includeSensitive);
+WHERE ClipFtsPrefix MATCH :query AND Clip.deleted = 0 AND (Clip.sensitive = 0 OR Clip.sensitive = :includeSensitive)
+  AND Clip.pinned >= :pinnedOnly AND (:type IS NULL OR Clip.contentType = :type);
 
 searchPrefix:
 SELECT Clip.* FROM Clip
 JOIN ClipFtsPrefix ON ClipFtsPrefix.rowid = Clip.rowid
 WHERE ClipFtsPrefix MATCH :query AND Clip.deleted = 0 AND (Clip.sensitive = 0 OR Clip.sensitive = :includeSensitive)
+  AND Clip.pinned >= :pinnedOnly AND (:type IS NULL OR Clip.contentType = :type)
 ORDER BY Clip.pinned DESC, Clip.createdAt DESC
 LIMIT :limit OFFSET :offset;
+
+countAll:
+SELECT count(*) FROM Clip WHERE deleted = 0;
+
+countSensitive:
+SELECT count(*) FROM Clip WHERE deleted = 0 AND sensitive = 1;
 
 -- Retention is a local policy: rows are removed outright, not tombstoned, and pinned clips are exempt.
 deleteOlderThan:

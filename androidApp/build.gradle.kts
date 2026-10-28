@@ -22,6 +22,7 @@ android {
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         versionCode = 1
         versionName = "1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     flavorDimensions += "distribution"
     productFlavors {
@@ -63,9 +64,17 @@ dependencies {
     "syncImplementation"(project(":sync"))
 
     implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.core.ktx) // Drawable.toBitmap for source-app icons
+    implementation(libs.compose.material3)
 
     implementation(libs.compose.uiToolingPreview)
     debugImplementation(libs.compose.uiTooling)
+
+    androidTestImplementation(libs.androidx.testRunner)
+    androidTestImplementation(libs.androidx.testExt.junit)
+    androidTestImplementation(libs.kotlin.test)
+    androidTestImplementation(libs.compose.uiTestJunit4)
+    debugImplementation(libs.compose.uiTestManifest)
 }
 
 /** Fails if a vault variant's merged manifest asks for network access or its classpath carries sync code. */
