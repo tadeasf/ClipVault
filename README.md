@@ -1,30 +1,36 @@
-This is a Kotlin Multiplatform project targeting Android, Desktop (JVM).
+# ClipVault
 
-* [/shared](./shared/src) is for code that will be shared across your Compose Multiplatform applications.
-  It contains several subfolders:
-  - [commonMain](./shared/src/commonMain/kotlin) is for code that’s common for all targets.
-  - Other folders are for Kotlin code that will be compiled for only the platform indicated in the folder name.
-    For example, if you want to use Apple’s CoreCrypto for the iOS part of your Kotlin app,
-    the [iosMain](./shared/src/iosMain/kotlin) folder would be the right place for such calls.
-    Similarly, if you want to edit the Desktop (JVM) specific part, the [jvmMain](./shared/src/jvmMain/kotlin)
-    folder is the appropriate location.
+ClipVault is a privacy-first clipboard history manager for Android and Linux desktop. History
+stays on your devices, encrypted at rest. Sensitive clips such as passwords, one-time codes and
+card numbers are detected locally, hidden and expired quickly. Optional sync works only between
+your own devices on the local network, end-to-end encrypted. There is no cloud, no account and no
+telemetry. Design: [docs/design.md](docs/design.md). Versions: [docs/versions.md](docs/versions.md).
 
-### Running the apps
+**Not yet on F-Droid.** Early development; build from source for now.
 
-Use the run configurations provided by the run widget in your IDE's toolbar. You can also use these commands and options:
+## Two Android flavors
 
-- Android app: `./gradlew :androidApp:assembleDebug`
-- Desktop app:
-  - Hot reload: `./gradlew :desktopApp:hotRun --auto`
-  - Standard run: `./gradlew :desktopApp:run`
+- **`vault`** (`cz.tadeasf.clipvault`) declares no network permission at all and contains no sync
+  code. CI fails the build if either ever changes.
+- **`sync`** (`cz.tadeasf.clipvault.sync`) adds LAN sync with your other devices. It is the only
+  flavor with network permissions.
 
-### Running tests
+The two flavors install side by side and will be separate F-Droid listings. The desktop app
+always includes sync, off until you enable it.
 
-Use the run button in your IDE's editor gutter, or run tests using Gradle tasks:
+## Modules
 
-- Android tests: `./gradlew :shared:testAndroidHostTest`
-- Desktop tests: `./gradlew :shared:jvmTest`
+- `shared`: domain and storage (KMP android + jvm). No UI, no network.
+- `ui`: shared Compose screens (KMP android + jvm).
+- `sync-core`: sync protocol, crypto, transport, discovery (KMP android + jvm).
+- `sync`: Android glue for the `sync` flavor; holds the network permissions.
+- `androidApp`: Android app, flavors `vault` (offline, no sync code) and `sync`.
+- `desktopApp`: Compose for Desktop app (Linux), sync always included.
 
----
+## Build
 
-Learn more about [Kotlin Multiplatform](https://www.jetbrains.com/help/kotlin-multiplatform-dev/get-started.html)…
+- Android: `./gradlew :androidApp:assembleVaultDebug` / `:androidApp:assembleSyncDebug`
+- Desktop: `./gradlew :desktopApp:run`
+- Tests: `./gradlew :shared:allTests :sync-core:allTests`
+- Offline guard: `./gradlew :androidApp:verifyVaultReleaseOffline` fails if the vault flavor's
+  merged manifest declares a network permission or its classpath contains sync code.

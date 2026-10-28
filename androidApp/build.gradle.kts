@@ -1,3 +1,5 @@
+import org.gradle.api.artifacts.result.ResolvedComponentResult
+import org.gradle.api.artifacts.result.ResolvedDependencyResult
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -10,15 +12,6 @@ kotlin {
         jvmTarget = JvmTarget.JVM_11
     }
 }
-dependencies {
-    implementation(project(":shared"))
-
-    implementation(libs.androidx.activity.compose)
-
-    implementation(libs.compose.uiToolingPreview)
-    debugImplementation(libs.compose.uiTooling)
-}
-
 android {
     namespace = "cz.tadeasf.clipvault"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
@@ -29,6 +22,17 @@ android {
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         versionCode = 1
         versionName = "1.0"
+    }
+    flavorDimensions += "distribution"
+    productFlavors {
+        // No network permission, no sync code. Never weaken this flavor to make `sync` easier.
+        create("vault") {
+            dimension = "distribution"
+        }
+        create("sync") {
+            dimension = "distribution"
+            applicationIdSuffix = ".sync"
+        }
     }
     packaging {
         resources {
@@ -50,5 +54,55 @@ android {
     }
     buildFeatures {
         compose = true
+    }
+}
+
+// After `android {}`: the flavor configurations only exist once productFlavors are declared.
+dependencies {
+    implementation(project(":ui"))
+    "syncImplementation"(project(":sync"))
+
+    implementation(libs.androidx.activity.compose)
+
+    implementation(libs.compose.uiToolingPreview)
+    debugImplementation(libs.compose.uiTooling)
+}
+
+/** Fails if a vault variant's merged manifest asks for network access or its classpath carries sync code. */
+abstract class VerifyVaultOffline : DefaultTask() {
+    @get:InputFile
+    abstract val mergedManifest: RegularFileProperty
+
+    @get:Input
+    abstract val runtimeComponents: SetProperty<String>
+
+    @TaskAction
+    fun verify() {
+        val permission = Regex("""android\.permission\.(INTERNET|ACCESS_NETWORK_STATE|ACCESS_WIFI_STATE|CHANGE_WIFI_MULTICAST_STATE|ACCESS_LOCAL_NETWORK|NEARBY_WIFI_DEVICES)\b""")
+        val leaked = permission.findAll(mergedManifest.get().asFile.readText()).map { it.value }.toSet()
+        check(leaked.isEmpty()) { "vault manifest declares network permissions: $leaked" }
+
+        val syncCode = runtimeComponents.get().filter {
+            it == "project :sync" || it == "project :sync-core" || it.startsWith("io.ktor:") || it.startsWith("org.jmdns:")
+        }
+        check(syncCode.isEmpty()) { "vault runtime classpath contains sync code: $syncCode" }
+    }
+}
+
+fun ResolvedComponentResult.closure(seen: MutableSet<String> = mutableSetOf()): Set<String> {
+    if (seen.add(id.displayName)) {
+        dependencies.filterIsInstance<ResolvedDependencyResult>().forEach { it.selected.closure(seen) }
+    }
+    return seen
+}
+
+androidComponents {
+    onVariants(selector().withFlavor("distribution" to "vault")) { variant ->
+        val name = variant.name.replaceFirstChar { it.uppercase() }
+        val verify = tasks.register<VerifyVaultOffline>("verify${name}Offline") {
+            mergedManifest.set(variant.artifacts.get(com.android.build.api.artifact.SingleArtifact.MERGED_MANIFEST))
+            runtimeComponents.set(variant.runtimeConfiguration.incoming.resolutionResult.rootComponent.map { it.closure() })
+        }
+        tasks.named("check") { dependsOn(verify) }
     }
 }
