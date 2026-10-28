@@ -15,6 +15,13 @@ jobs:
           distribution: zulu
           java-version: 21
       - uses: gradle/actions/setup-gradle@v6
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Handshake vectors match the independent Python reference
+        run: |
+          python3 -m pip install -r tools/requirements.txt
+          python3 tools/handshake_vectors.py --check
 
       # Fails the build if the vault flavor gains a network permission or any sync code.
       - name: Verify vault flavor is offline
