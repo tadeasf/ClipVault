@@ -30,5 +30,8 @@ where it was verified (2026-10-28). Update both together.
 | kotest-property | 6.2.6 | Maven Central (2026-10-14) | `:sync-core` property tests only; used standalone (`checkAll`) inside kotlin.test, no kotest engine |
 | Kover | 0.9.11 | https://github.com/Kotlin/kotlinx-kover (2026-09-29) | host-JVM tests only |
 
+| WorkManager (`work-runtime-ktx`, `work-testing`) | 2.12.0 | Google Maven metadata (2026-09-23) | `:sync` catch-up while the service is stopped; `work-testing` only in the sync flavor's device tests |
+| CameraX (`camera-camera2`, `-lifecycle`, `-view`) | 1.6.2 | Google Maven metadata (2026-10-21) | sync flavor only: the pairing QR scanner (design 4: no ML Kit, it needs Play Services) |
+
 Added in later steps (verified in `docs/design.md` section 4, pinned when first used):
 Ktor 3.6.0, JmDNS 3.6.4, zxing core 3.5.4. (Tink 1.24.0 was planned and dropped on 2026-10-28: BouncyCastle 1.86 provides every primitive, see docs/sync/handshake.md section 2.)
