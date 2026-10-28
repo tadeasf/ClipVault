@@ -78,8 +78,16 @@ SELECT id FROM Clip WHERE contentHash = ? AND deleted = 0 LIMIT 1;
 touch:
 UPDATE Clip SET createdAt = :createdAt, seq = :seq WHERE id = :id;
 
-setFlags:
-UPDATE Clip SET pinned = :pinned, deleted = :deleted WHERE id = :id;
+-- A row's state is recomputed from its members (ClipLog.refold).
+setGroupState:
+UPDATE Clip SET pinned = :pinned, deleted = :deleted, createdAt = :createdAt WHERE id = :id;
+
+setSensitivity:
+UPDATE Clip SET sensitive = :sensitive, categories = :categories WHERE id = :id;
+
+-- A clip synced without its payload (over the cap) has '' content and its real hash until fetched.
+fillContent:
+UPDATE Clip SET content = :content WHERE id = :id AND content = '' AND contentHash = :contentHash;
 
 -- A deleted clip keeps its row (tombstone for sync) but loses its content.
 wipeContent:

@@ -13,6 +13,7 @@ CREATE TABLE MetaEvent (
 );
 
 CREATE INDEX meta_clip ON MetaEvent(clipId);
+CREATE UNIQUE INDEX meta_unique ON MetaEvent(clipId, field, value, lamportClock, deviceId);
 
 insert:
 INSERT INTO MetaEvent(seq, clipId, field, value, lamportClock, deviceId) VALUES (?, ?, ?, ?, ?, ?);
@@ -20,10 +21,12 @@ INSERT INTO MetaEvent(seq, clipId, field, value, lamportClock, deviceId) VALUES 
 forClip:
 SELECT clipId, field, value, lamportClock, deviceId FROM MetaEvent WHERE clipId = ?;
 
+-- clipId names a ClipMember. Orphaned deletes are kept, so a deleted clip that arrives again later stays deleted.
 deleteOrphans:
-DELETE FROM MetaEvent WHERE clipId NOT IN (SELECT id FROM Clip);
+DELETE FROM MetaEvent WHERE field != 'DELETED' AND clipId NOT IN (SELECT id FROM ClipMember);
 
-maxLamport:
-SELECT max(lamportClock) FROM (
-  SELECT lamportClock FROM Clip UNION ALL SELECT lamportClock FROM MetaEvent
-);
+exists:
+SELECT count(*) FROM MetaEvent WHERE clipId = ? AND field = ? AND value = ? AND lamportClock = ? AND deviceId = ?;
+
+after:
+SELECT * FROM MetaEvent WHERE seq > :since ORDER BY seq LIMIT :limit;

@@ -1,0 +1,50 @@
+-- One row per ClipCreated id this device knows (docs/sync/protocol.md section 7). clipId is the Clip
+-- row that shows it: members with the same live content share one row.
+CREATE TABLE ClipMember (
+  id TEXT NOT NULL PRIMARY KEY,
+  clipId TEXT NOT NULL,
+  deviceId TEXT NOT NULL,
+  createdAt INTEGER NOT NULL,
+  lamportClock INTEGER NOT NULL,
+  seq INTEGER NOT NULL
+);
+
+CREATE INDEX member_clip ON ClipMember(clipId);
+CREATE UNIQUE INDEX member_seq ON ClipMember(seq);
+
+-- A table, not max() over rows: retention deletes rows and the clock must never go back.
+CREATE TABLE LamportClock (
+  id INTEGER NOT NULL PRIMARY KEY CHECK (id = 1),
+  value INTEGER NOT NULL
+);
+
+INSERT INTO LamportClock(id, value) VALUES (1, 0);
+
+insert:
+INSERT INTO ClipMember(id, clipId, deviceId, createdAt, lamportClock, seq) VALUES (?, ?, ?, ?, ?, ?);
+
+selectById:
+SELECT * FROM ClipMember WHERE id = ?;
+
+forClip:
+SELECT * FROM ClipMember WHERE clipId = ?;
+
+-- Re-copy: a new seq so the bump replicates.
+bump:
+UPDATE ClipMember SET createdAt = :createdAt, seq = :seq WHERE id = :id;
+
+after:
+SELECT * FROM ClipMember WHERE seq > :since ORDER BY seq LIMIT :limit;
+
+deleteOrphans:
+DELETE FROM ClipMember WHERE clipId NOT IN (SELECT id FROM Clip);
+
+tickClock:
+UPDATE LamportClock SET value = value + 1 WHERE id = 1;
+
+-- Lamport receive rule.
+observeClock:
+UPDATE LamportClock SET value = max(value, :seen) + 1 WHERE id = 1;
+
+currentClock:
+SELECT value FROM LamportClock WHERE id = 1;

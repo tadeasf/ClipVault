@@ -1,0 +1,34 @@
+-- Sync bookkeeping (docs/sync/protocol.md section 12). Encrypted with the same key as ClipDatabase.
+
+-- Catch-up position per peer: the highest of its seqs this device has applied, and the sensitive
+-- opt-ins (comma-separated category names) in effect then, to notice a later opt-in.
+CREATE TABLE PeerCursor (
+  peerId TEXT NOT NULL PRIMARY KEY,
+  lastSeqReceived INTEGER NOT NULL,
+  optIns TEXT NOT NULL DEFAULT ''
+);
+
+-- Which peer a stored event (local seq) came from, so it is never sent back there.
+CREATE TABLE EventOrigin (
+  seq INTEGER NOT NULL PRIMARY KEY,
+  peerId TEXT NOT NULL
+);
+
+cursor:
+SELECT lastSeqReceived, optIns FROM PeerCursor WHERE peerId = ?;
+
+-- SQLDelight's default dialect (SQLite 3.18) has no UPSERT: ensure the row, then update it.
+ensure:
+INSERT OR IGNORE INTO PeerCursor(peerId, lastSeqReceived) VALUES (?, 0);
+
+advance:
+UPDATE PeerCursor SET lastSeqReceived = max(lastSeqReceived, :seq) WHERE peerId = :peerId;
+
+setOptIns:
+UPDATE PeerCursor SET optIns = :optIns WHERE peerId = :peerId;
+
+recordOrigin:
+INSERT OR REPLACE INTO EventOrigin(seq, peerId) VALUES (?, ?);
+
+origin:
+SELECT peerId FROM EventOrigin WHERE seq = ?;
