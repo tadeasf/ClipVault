@@ -35,7 +35,7 @@ class SecretServiceKeyring private constructor(private val service: String) : Ke
         if (collectionPath.path == NO_OBJECT) throw IOException("Keyring has no default collection")
         bus.unlock(secrets, listOf(collectionPath))
         val properties = mapOf(
-            "org.freedesktop.Secret.Item.Label" to Variant("ClipVault database key"),
+            "org.freedesktop.Secret.Item.Label" to Variant("ClipVault $account"),
             "org.freedesktop.Secret.Item.Attributes" to Variant(attributes(account), "a{ss}"),
         )
         val item = Secret(session, ByteArray(0), secret, "application/octet-stream")
