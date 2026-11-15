@@ -109,7 +109,10 @@ internal object KeyRules {
     )
     private val privateKeyBlock = Regex("""-----BEGIN [A-Z0-9 ]*PRIVATE KEY[A-Z ]*-----""")
 
-    fun apiKey(text: String) = apiKeys.any { it.containsMatchIn(text) }
+    // A clip that is just a URL to this machine (Stash's ?apikey=, a local dashboard) keeps its key on it.
+    private val loopbackUrl = Regex("""^https?://(?:localhost|127(?:\.\d{1,3}){3}|\[::1])(?::\d+)?(?:[/?#]\S*)?$""")
+
+    fun apiKey(text: String) = !loopbackUrl.matches(text.trim()) && apiKeys.any { it.containsMatchIn(text) }
 
     fun privateKey(text: String) = privateKeyBlock.containsMatchIn(text)
 }
