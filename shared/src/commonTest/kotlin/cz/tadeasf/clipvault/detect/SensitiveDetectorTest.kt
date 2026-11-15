@@ -34,6 +34,8 @@ class SensitiveDetectorTest {
         "xoxb-1234567890-abcdefghij" to setOf(API_KEY),
         "AIzaSyA1234567890abcdefghijklmnopqrstuv" to setOf(API_KEY),
         "Bearer $fakeJwt" to setOf(API_KEY),
+        "https://stash.example.com/scene/1/stream?apikey=$fakeJwt" to setOf(API_KEY),
+        "http://localhost:9999/scene/1/stream?apikey=$fakeJwt\nBearer $fakeJwt" to setOf(API_KEY),
         "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\n-----END OPENSSH PRIVATE KEY-----" to setOf(PRIVATE_KEY),
         "-----BEGIN RSA PRIVATE KEY-----" to setOf(PRIVATE_KEY),
         "admin:S3cr3t!pass" to setOf(CREDENTIALS_PAIR),
@@ -67,6 +69,8 @@ class SensitiveDetectorTest {
         "11000", // Prague postcode without its space
         "16000",
         "17.11.",
+        "http://localhost:9999/scene/1/stream?apikey=$fakeJwt", // loopback URL: the key stays on this machine
+        "http://127.0.0.1:8080/?token=$fakeJwt",
         "4821", // a bare 4-digit PIN is knowingly missed (no keyword)
         "12345678", // bare 8 digits need a keyword
         "Rok 2026 bude dobrý",
